@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Postal - Voice + Face Biometrics</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h2 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="email"], input[type="password"], input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        button.record { background-color: #dc3545; }
+        button.record.recording { animation: pulse 1.5s infinite; }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        #log {
+            background-color: #333;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 4px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        .hidden { display: none; }
+        .status { margin-top: 10px; padding: 10px; border-radius: 4px; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>🏦 Smart Postal - Multi-Modal Biometric System</h1>
+    <p style="text-align: center; color: #666; margin-top: -10px;">Banking-Grade Voice + Face Recognition | Smart Locker Integration</p>
+
+    <!-- Auth Section -->
+    <div class="container" id="auth-section">
+        <h2>Authentication</h2>
+        
+        <div id="login-form">
+            <h3>Login</h3>
+            <div class="form-group">
+                <label>Email:</label>
+                <input type="email" id="login-email" value="test@example.com">
+            </div>
+            <div class="form-group">
+                <label>Password:</label>
+                <input type="password" id="login-password" value="Password123">
+            </div>
+            <button onclick="login()">Login</button>
+            <button onclick="toggleRegister()" style="background-color: #6c757d;">Switch to Register</button>
+            <button onclick="testMode()" style="background-color: #28a745; margin-top: 10px;">🎤 Test Voice Assistant (Skip Login)</button>
+        </div>
+
+        <div id="register-form" class="hidden">
+            <h3>Register</h3>
+            <div class="form-group">
+                <label>Full Name:</label>
+                <input type="text" id="reg-name">
+            </div>
+            <div class="form-group">
+                <label>Email:</label>
+                <input type="email" id="reg-email">
+            </div>
+            <div class="form-group">
+                <label>Phone:</label>
+                <input type="text" id="reg-phone">
+            </div>
+            <div class="form-group">
+                <label>Password:</label>
+                <input type="password" id="reg-password">
+            </div>
+            <button onclick="register()">Register</button>
+            <button onclick="toggleRegister()" style="background-color: #6c757d;">Switch to Login</button>
+        </div>
+    </div>
+
+    <!-- Main App Section -->
+    <div class="container hidden" id="app-section">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Welcome, <span id="user-name">User</span></h3>
+            <button onclick="logout()" style="background-color: #6c757d;">Logout</button>
+        </div>
+
+        <hr>
+
+        <!-- Enrollment -->
+        <div class="form-group">
+            <h3>1. Voice Enrollment</h3>
+            <p>Upload a voice recording to create a voice template. <strong>Minimum 3 samples required.</strong></p>
+            <div style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin-bottom: 10px; border-left: 4px solid #28a745;">
+                <strong>✅ Real-World Friendly Requirements:</strong>
+                <ul style="margin: 5px 0; padding-left: 20px; font-size: 0.9em;">
+                    <li>Duration: 0.5-60 seconds (flexible)</li>
+                    <li>Works outdoors & noisy environments 🌍</li>
+                    <li>Auto noise reduction (SNR ≥ 3dB)</li>
+                    <li>Natural speech - works with background noise!</li>
+                </ul>
+            </div>
+            <input type="file" id="enroll-file" accept="audio/*">
+            <br><br>
+            <button onclick="submitEnrollment()" id="enroll-submit">📤 Submit Enrollment Sample</button>
+        </div>
+
+        <hr>
+
+        <!-- Verification -->
+        <div class="form-group">
+            <h3>2. Voice Verification</h3>
+            <p>Upload a voice recording to verify against your enrolled voice. <strong>Works outdoors & noisy environments! 🌍</strong></p>
+            <div class="form-group">
+                <label>Order ID (optional for testing):</label>
+                <input type="number" id="verify-order-id" placeholder="Leave blank to verify yourself">
+            </div>
+            <input type="file" id="verify-file" accept="audio/*">
+            <br><br>
+            <button onclick="submitVerification()" id="verify-submit">🔍 Verify Voice (Banking-Grade)</button>
+        </div>
+
+        <hr>
+
+        <!-- Face Recognition Section -->
+        <div class="form-group">
+            <h3>3. Face ID Enrollment (ID Card)</h3>
+            <p>Upload your ID card photo to extract and enroll your face template. 📸</p>
+            <div style="background-color: #d1ecf1; padding: 10px; border-radius: 4px; margin-bottom: 10px; border-left: 4px solid #17a2b8;">
+                <strong>ℹ️ Face Enrollment Requirements:</strong>
+                <ul style="margin: 5px 0; padding-left: 20px; font-size: 0.9em;">
+                    <li>Min face size: 80x80 pixels</li>
+                    <li>Brightness: 0.2-0.9 (auto-adjusted)</li>
+                    <li>Liveness detection: texture, color, edge, frequency analysis</li>
+                    <li>Clear frontal view required</li>
+                </ul>
+            </div>
+            <input type="file" id="face-enroll-file" accept="image/*">
+            <br><br>
+            <div class="form-group">
+                <label>Name on ID (optional):</label>
+                <input type="text" id="face-name" placeholder="Full name">
+            </div>
+            <div class="form-group">
+                <label>Phone on ID (optional):</label>
+                <input type="text" id="face-phone" placeholder="Phone number">
+            </div>
+            <div class="form-group">
+                <label>Address on ID (optional):</label>
+                <input type="text" id="face-address" placeholder="Address">
+            </div>
+            <button onclick="submitFaceEnrollment()" id="face-enroll-submit">📸 Enroll Face from ID Card</button>
+        </div>
+
+        <hr>
+
+        <!-- Face Verification Section -->
+        <div class="form-group">
+            <h3>4. Face Verification (Live Photo)</h3>
+            <p>Upload a live face photo to verify against enrolled template. 🔍</p>
+            <div class="form-group">
+                <label>User ID to verify:</label>
+                <input type="number" id="face-verify-user-id" placeholder="User ID">
+            </div>
+            <div class="form-group">
+                <label>Order ID (optional):</label>
+                <input type="number" id="face-verify-order-id" placeholder="Order ID">
+            </div>
+            <input type="file" id="face-verify-file" accept="image/*">
+            <br><br>
+            <button onclick="submitFaceVerification()" id="face-verify-submit">✅ Verify Face Identity</button>
+        </div>
+
+        <hr>
+
+        <!-- Locker Face Verification -->
+        <div class="form-group" style="background-color: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
+            <h3>5. 🔒 Smart Locker Face Unlock</h3>
+            <p>Verify face at smart locker camera to generate unlock token. <strong>Stricter liveness checks!</strong></p>
+            <div class="form-group">
+                <label>Locker ID:</label>
+                <input type="text" id="locker-id" placeholder="e.g., LOCKER-001">
+            </div>
+            <div class="form-group">
+                <label>User ID:</label>
+                <input type="number" id="locker-user-id" placeholder="User ID">
+            </div>
+            <div class="form-group">
+                <label>Parcel ID (optional):</label>
+                <input type="text" id="locker-parcel-id" placeholder="Parcel ID">
+            </div>
+            <input type="file" id="locker-face-file" accept="image/*">
+            <br><br>
+            <button onclick="submitLockerVerification()" id="locker-verify-submit">🔓 Verify Face at Locker</button>
+        </div>
+
+        <hr>
+
+        <!-- Locker Unlock Token Display -->
+        <div class="form-group hidden" id="locker-token-section" style="background-color: #d4edda; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745;">
+            <h3>✅ Unlock Token Generated</h3>
+            <p>Token expires in 5 minutes. Use it to unlock the locker:</p>
+            <div style="background-color: white; padding: 15px; border-radius: 5px; margin: 10px 0; font-family: monospace;">
+                <p style="font-size: 1.2em; font-weight: bold; color: #28a745; text-align: center; word-break: break-all;" id="locker-token-display"></p>
+            </div>
+            <button onclick="unlockLocker()" style="background-color: #28a745;">🔓 Unlock Locker Now</button>
+            <button onclick="closeTokenDisplay()" style="background-color: #6c757d;">Close</button>
+        </div>
+
+        <hr>
+
+        <!-- Sinhala Voice Assistant Section -->
+        <div class="form-group" style="background-color: #e8f5e9; padding: 15px; border-radius: 5px; border-left: 4px solid #4caf50;">
+            <h3>🎤 Sinhala Voice Assistant (සිංහල හඬ සහායක)</h3>
+            <p><strong>🎙️ Live Voice Interaction:</strong> Click button, speak in Sinhala, get instant response!</p>
+            <div style="background-color: #c8e6c9; padding: 10px; border-radius: 4px; margin-bottom: 10px;">
+                <strong>🇱🇰 What you can ask:</strong>
+                <ul style="margin: 5px 0; padding-left: 20px; font-size: 0.9em;">
+                    <li>"මගේ පාර්සලය කොහෙද?" (Where's my parcel?) - TRK001</li>
+                    <li>"කොළඹ ඉඳන් කෑන්දියට කිලෝ 2 ට කීයද?" (Rates)</li>
+                    <li>"මාර්ගය වෙනස් කරන්න ඕන" (Reschedule)</li>
+                    <li>Supports Singlish too! (e.g., "TRK eka koheda?")</li>
+                </ul>
+            </div>
+            
+            <!-- Live Voice Recording -->
+            <div style="margin-bottom: 15px; text-align: center;">
+                <div style="background-color: white; padding: 20px; border-radius: 10px; margin-bottom: 15px; border: 2px solid #4caf50;">
+                    <div id="recording-status" style="font-size: 1.2em; font-weight: bold; color: #666; margin-bottom: 10px;">
+                        🎤 Ready to listen
+                    </div>
+                    <div id="recording-timer" class="hidden" style="font-size: 2em; font-weight: bold; color: #dc3545; margin: 10px 0;">
+                        00:00
+                    </div>
+                </div>
+                
+                <button onclick="toggleVoiceRecording()" id="voice-record-btn" class="record" style="background-color: #dc3545; font-size: 1.2em; padding: 15px 30px; border-radius: 50px;">
+                    🎙️ Hold to Speak
+                </button>
+                <button onclick="cancelRecording()" id="voice-cancel-btn" class="hidden" style="background-color: #6c757d; margin-left: 10px;">
+                    ❌ Cancel
+                </button>
+            </div>
+
+            <!-- Or Upload Audio File -->
+            <div style="margin-bottom: 15px; padding: 10px; background-color: #fff3cd; border-radius: 5px;">
+                <details>
+                    <summary style="cursor: pointer; font-weight: bold; color: #856404;">📁 Or Upload Audio File (Alternative)</summary>
+                    <div style="margin-top: 10px;">
+                        <input type="file" id="assistant-audio-file" accept="audio/*">
+                        <br><br>
+                        <button onclick="submitVoiceAssistantQuery()" id="assistant-voice-submit" style="background-color: #4caf50;">
+                            📤 Upload & Process
+                        </button>
+                    </div>
+                </details>
+            </div>
+
+            <!-- Text Query (for testing) -->
+            <div style="margin-bottom: 15px; padding: 10px; background-color: #e3f2fd; border-radius: 5px;">
+                <details>
+                    <summary style="cursor: pointer; font-weight: bold; color: #1565c0;">💬 Or Type Text Query (Testing)</summary>
+                    <div style="margin-top: 10px;">
+                        <input type="text" id="assistant-text-input" placeholder="Type in Sinhala or Singlish..." style="width: 100%; padding: 10px;">
+                        <br><br>
+                        <button onclick="submitTextAssistantQuery()" id="assistant-text-submit" style="background-color: #66bb6a;">
+                            💬 Send Text
+                        </button>
+                        <button onclick="resetAssistantConversation()" style="background-color: #9e9e9e;">
+                            🔄 Reset Chat
+                        </button>
+                    </div>
+                </details>
+            </div>
+
+            <!-- Assistant Response -->
+            <div id="assistant-response" class="hidden" style="background-color: white; padding: 15px; border-radius: 5px; margin-top: 10px; border: 2px solid #4caf50;">
+                <h4 style="margin-top: 0; color: #2e7d32;">🤖 Assistant Response:</h4>
+                <p id="assistant-transcript" style="color: #666; font-style: italic; margin: 5px 0;">You said: <span id="assistant-user-text"></span></p>
+                <p id="assistant-response-text" style="font-size: 1.1em; color: #1b5e20; font-weight: 500; padding: 10px; background-color: #f1f8e9; border-radius: 4px;"></p>
+            </div>
+        </div>
+
+        <hr>
+
+        <!-- Challenge Section (Hidden by default) -->
+        <div class="form-group hidden" id="challenge-section" style="background-color: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
+            <h3>⚠️ Active Liveness Challenge Required</h3>
+            <p id="challenge-message">High risk detected. Please complete the challenge to continue.</p>
+            <div style="background-color: white; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                <h4 style="margin-top: 0; color: #856404;">📢 Speak the following phrase:</h4>
+                <p id="challenge-phrase" style="font-size: 1.5em; font-weight: bold; color: #007bff; text-align: center; padding: 15px; background-color: #e7f3ff; border-radius: 5px;"></p>
+            </div>
+            <input type="file" id="challenge-file" accept="audio/*">
+            <input type="hidden" id="challenge-id">
+            <input type="hidden" id="challenge-order-id">
+            <br><br>
+            <button onclick="submitChallenge()" style="background-color: #ffc107; color: #000;">🎤 Submit Challenge Response</button>
+            <button onclick="cancelChallenge()" style="background-color: #6c757d;">Cancel</button>
+        </div>
+
+        <hr>
+
+        <!-- Info Section -->
+        <div class="form-group" style="background-color: #e7f3ff; padding: 15px; border-radius: 5px; border-left: 4px solid #007bff;">
+            <h4 style="margin-top: 0;">🔐 Multi-Modal Biometric Security Features</h4>
+            
+            <h5 style="margin-top: 10px; color: #0056b3;">🎤 Voice Authentication (Banking-Grade)</h5>
+            <ul style="margin: 10px 0; padding-left: 20px;">
+                <li><strong>Multi-Metric Ensemble:</strong> 3 verification metrics (Cosine, Euclidean, Correlation)</li>
+                <li><strong>11-Layer AI Detection:</strong> MFCC, Spectral, Temporal, Phase, LFCC, Replay detection</li>
+                <li><strong>Noise Reduction:</strong> Advanced preprocessing for outdoor/noisy environments 🌍</li>
+                <li><strong>Quality Assessment:</strong> Lenient checks (SNR ≥3dB, accepts noisy audio)</li>
+                <li><strong>Liveness Detection:</strong> Smart anti-spoofing + AI/synthetic voice detection</li>
+                <li><strong>Risk-Based Decision Engine:</strong> 4-tier risk assessment (LOW/MEDIUM/HIGH/CRITICAL)</li>
+                <li><strong>Challenge-Response:</strong> Active liveness for high-risk attempts</li>
+                <li><strong>Thresholds:</strong> 80% ensemble + 65% cosine (balanced for accuracy)</li>
+            </ul>
+            
+            <h5 style="margin-top: 10px; color: #0056b3;">📸 Face Recognition (DeepFace + RetinaFace)</h5>
+            <ul style="margin: 10px 0; padding-left: 20px;">
+                <li><strong>Detection:</strong> RetinaFace high-accuracy detector + HOG fallback</li>
+                <li><strong>Embeddings:</strong> Facenet512 (512-dim) encrypted biometric vectors</li>
+                <li><strong>Quality Checks:</strong> Face size (≥80px), brightness (0.2-0.9), sharpness, frontal detection</li>
+                <li><strong>Liveness Detection:</strong> Texture variance, color saturation, edge density, frequency analysis</li>
+                <li><strong>Anti-Spoofing:</strong> Photo/screen attack prevention</li>
+                <li><strong>Verification Threshold:</strong> 60% cosine similarity (40% for locker)</li>
+                <li><strong>Smart Locker Integration:</strong> JWT-based unlock tokens (5min expiry)</li>
+                <li><strong>ID Card Processing:</strong> Automatic face extraction from ID documents</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="container">
+        <h3>Logs</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api';
+        let token = localStorage.getItem('token');
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let currentBlob = null;
+
+        // Init
+        if (token) {
+            showApp();
+        }
+
+        function log(msg, type = 'info') {
+            const div = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            if (type === 'error') entry.style.color = '#ff6b6b';
+            if (type === 'success') entry.style.color = '#51cf66';
+            div.prepend(entry);
+        }
+
+        function toggleRegister() {
+            document.getElementById('login-form').classList.toggle('hidden');
+            document.getElementById('register-form').classList.toggle('hidden');
+        }
+
+        function showApp() {
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('app-section').classList.remove('hidden');
+            log('Authenticated successfully', 'success');
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            token = null;
+            location.reload();
+        }
+
+        function testMode() {
+            // Set a test token for demo purposes
+            token = 'test-mode-token';
+            localStorage.setItem('token', token);
+            showApp();
+            log('🎤 Test Mode: Voice Assistant Ready (No real authentication)', 'success');
+        }
+
+        // --- Auth Functions ---
+
+        async function login() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+
+            if (!email || !password) {
+                log('❌ Please enter both email and password', 'error');
+                return;
+            }
+
+            try {
+                log('🔄 Attempting login...');
+                log(`📧 Email: ${email}`, 'info');
+                log(`🌐 API URL: ${API_URL}/auth/login`, 'info');
+                
+                const res = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                log(`📡 Response status: ${res.status} ${res.statusText}`, 'info');
+                
+                const data = await res.json();
+                log(`📦 Response data: ${JSON.stringify(data).substring(0, 100)}...`, 'info');
+                
+                if (!res.ok) throw new Error(data.detail || 'Login failed');
+
+                token = data.access_token;
+                localStorage.setItem('token', token);
+                log(`✅ Login successful! Token: ${token.substring(0, 20)}...`, 'success');
+                showApp();
+            } catch (e) {
+                log(`❌ Login error: ${e.message}`, 'error');
+                if (e.message.includes('Failed to fetch')) {
+                    log('⚠️ Cannot connect to server. Make sure the backend is running at http://localhost:8000', 'error');
+                }
+            }
+        }
+
+        async function register() {
+            const data = {
+                email: document.getElementById('reg-email').value,
+                password: document.getElementById('reg-password').value,
+                full_name: document.getElementById('reg-name').value,
+                phone: document.getElementById('reg-phone').value,
+                role: "customer"
+            };
+
+            try {
+                const res = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await res.json();
+                if (!res.ok) throw new Error(result.detail || 'Registration failed');
+
+                log('Registration successful! Please login.', 'success');
+                toggleRegister();
+            } catch (e) {
+                log(e.message, 'error');
+            }
+        }
+
+        // --- API Calls ---
+
+        async function submitEnrollment() {
+            const fileInput = document.getElementById('enroll-file');
+            if (!fileInput.files[0]) {
+                log('Please select a file first', 'error');
+                return;
+            }
+
+            if (!token) {
+                log('❌ Not authenticated. Please login first.', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                log('📤 Uploading enrollment sample (AI detection + quality check)...');
+                log(`🔑 Using token: ${token.substring(0, 20)}...`);
+                const res = await fetch(`${API_URL}/voice/enroll`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Enrollment failed');
+
+                log(`✅ ${data.message}`, 'success');
+                log(`📊 Samples Enrolled: ${data.samples_recorded}/${data.samples_required}`, 'success');
+                
+                // Show risk assessment
+                if (data.decision && data.risk_level) {
+                    const riskEmoji = {
+                        'low': '🟢',
+                        'medium': '🟡',
+                        'high': '🟠',
+                        'critical': '🔴'
+                    };
+                    log(`${riskEmoji[data.risk_level] || '⚪'} Risk Level: ${data.risk_level.toUpperCase()} (Score: ${(data.risk_score * 100).toFixed(1)}%)`, 
+                        data.risk_level === 'low' ? 'success' : 'info');
+                    log(`📋 Decision: ${data.decision.toUpperCase()}`, 'info');
+                }
+                
+                // Handle challenge requirement
+                if (data.decision === 'challenge' && data.challenge_id) {
+                    log(`⚠️ Challenge required for high-risk enrollment`, 'error');
+                    log(`Please complete the active liveness challenge`, 'error');
+                    // Could trigger challenge UI here if needed
+                }
+                
+                if (data.enrollment_complete) {
+                    log(`🎉 Enrollment COMPLETE! You can now verify your voice.`, 'success');
+                } else {
+                    log(`ℹ️ Please enroll ${data.samples_required - data.samples_recorded} more sample(s).`);
+                }
+                
+                // Reset
+                fileInput.value = '';
+            } catch (e) {
+                log(`❌ Error: ${e.message}`, 'error');
+            }
+        }
+
+        async function submitVerification() {
+            const fileInput = document.getElementById('verify-file');
+            if (!fileInput.files[0]) {
+                log('Please select a file first', 'error');
+                return;
+            }
+            
+            const orderId = document.getElementById('verify-order-id').value;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            if (orderId) {
+                formData.append('order_id', orderId);
+            }
+
+            try {
+                log('🔍 Processing audio (11-layer AI detection + quality check)...');
+                const res = await fetch(`${API_URL}/voice/verify`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Verification failed');
+
+                // Enhanced logging with risk assessment
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                // Risk Assessment
+                if (data.decision && data.risk_level) {
+                    const riskEmoji = {
+                        'low': '🟢',
+                        'medium': '🟡',
+                        'high': '🟠',
+                        'critical': '🔴'
+                    };
+                    log(`${riskEmoji[data.risk_level] || '⚪'} Risk Level: ${data.risk_level.toUpperCase()} (Score: ${(data.risk_score * 100).toFixed(1)}%)`, 
+                        data.risk_level === 'low' ? 'success' : 'info');
+                    log(`📋 Decision: ${data.decision.toUpperCase()}`, 'info');
+                }
+                
+                // Verification Result
+                if (data.verified) {
+                    log(`✅ VERIFICATION SUCCESSFUL`, 'success');
+                    log(`🎯 Ensemble Score: ${data.confidence_score.toFixed(4)} (Threshold: 0.80)`, 'success');
+                } else {
+                    log(`❌ VERIFICATION FAILED`, 'error');
+                    log(`📊 Ensemble Score: ${data.confidence_score.toFixed(4)} (Threshold: 0.80)`, 'error');
+                    log(`💬 Reason: ${data.message}`, 'error');
+                }
+                
+                // AI Detection Details
+                if (data.ai_detected) {
+                    log(`🚨 AI/Synthetic Voice DETECTED (Probability: ${(data.ai_probability * 100).toFixed(1)}%)`, 'error');
+                    if (data.is_rerecorded) {
+                        log(`🔊 Re-recorded audio detected (speaker → microphone)`, 'error');
+                    }
+                } else {
+                    log(`✅ Human Voice Confirmed (AI Probability: ${(data.ai_probability * 100).toFixed(1)}%)`, 'success');
+                }
+                
+                // Handle Challenge Requirement
+                if (data.decision === 'challenge' && data.challenge_id) {
+                    log(`⚠️ HIGH RISK - Active liveness challenge required!`, 'error');
+                    showChallenge(data.challenge_id, data.challenge_phrase, orderId);
+                }
+                
+                // Handle 2FA Requirement
+                if (data.decision === 'require_2fa') {
+                    log(`🔴 CRITICAL RISK - Two-factor authentication required!`, 'error');
+                    log(`Please contact support for account verification`, 'error');
+                }
+                
+                // Flag for review
+                if (data.should_flag) {
+                    log(`🚩 Flagged for security review`, 'info');
+                }
+                
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                // Reset
+                fileInput.value = '';
+            } catch (e) {
+                log(`❌ Error: ${e.message}`, 'error');
+            }
+        }
+
+        function showChallenge(challengeId, phrase, orderId) {
+            document.getElementById('challenge-section').classList.remove('hidden');
+            document.getElementById('challenge-phrase').textContent = phrase;
+            document.getElementById('challenge-id').value = challengeId;
+            document.getElementById('challenge-order-id').value = orderId || '';
+            
+            // Scroll to challenge section
+            document.getElementById('challenge-section').scrollIntoView({ behavior: 'smooth' });
+            
+            log(`📢 Challenge phrase: "${phrase}"`, 'info');
+            log(`Please record yourself saying this phrase`, 'info');
+        }
+
+        function cancelChallenge() {
+            document.getElementById('challenge-section').classList.add('hidden');
+            document.getElementById('challenge-file').value = '';
+            log('Challenge cancelled', 'info');
+        }
+
+        async function submitChallenge() {
+            const fileInput = document.getElementById('challenge-file');
+            if (!fileInput.files[0]) {
+                log('Please select a challenge audio file first', 'error');
+                return;
+            }
+
+            const challengeId = document.getElementById('challenge-id').value;
+            const orderId = document.getElementById('challenge-order-id').value;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('challenge_id', challengeId);
+            if (orderId) {
+                formData.append('order_id', orderId);
+            }
+
+            try {
+                log('🎤 Submitting challenge response (STRICT verification)...');
+                const res = await fetch(`${API_URL}/voice/challenge/verify`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Challenge verification failed');
+
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                if (data.challenge_passed) {
+                    log(`✅ CHALLENGE PASSED!`, 'success');
+                    log(`🎯 Confidence Score: ${data.confidence_score.toFixed(4)}`, 'success');
+                    log(`✅ Voice verified successfully`, 'success');
+                    log(`🟢 Risk Level: ${data.risk_level.toUpperCase()}`, 'success');
+                } else {
+                    log(`❌ CHALLENGE FAILED`, 'error');
+                    log(`📊 Confidence Score: ${data.confidence_score.toFixed(4)}`, 'error');
+                    log(`💬 ${data.message}`, 'error');
+                    log(`🔴 Risk Level: ${data.risk_level.toUpperCase()}`, 'error');
+                }
+                
+                if (data.ai_detected) {
+                    log(`🚨 AI/Synthetic voice detected in challenge response!`, 'error');
+                } else {
+                    log(`✅ Human voice confirmed`, 'success');
+                }
+                
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                // Hide challenge section
+                cancelChallenge();
+            } catch (e) {
+                log(`❌ Challenge error: ${e.message}`, 'error');
+            }
+        }
+
+        // ========== FACE RECOGNITION FUNCTIONS ==========
+        
+        async function submitFaceEnrollment() {
+            const fileInput = document.getElementById('face-enroll-file');
+            if (!fileInput.files[0]) {
+                log('Please select an ID card image first', 'error');
+                return;
+            }
+
+            if (!token) {
+                log('❌ Not authenticated. Please login first!', 'error');
+                return;
+            }
+
+            const name = document.getElementById('face-name').value;
+            const phone = document.getElementById('face-phone').value;
+            const address = document.getElementById('face-address').value;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            if (name) formData.append('name', name);
+            if (phone) formData.append('phone', phone);
+            if (address) formData.append('address', address);
+
+            try {
+                log('📸 Processing ID card and extracting face...');
+                log(`🔑 Using token: ${token.substring(0, 20)}...`);
+                const res = await fetch(`${API_URL}/face/id/upload`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail?.error || data.detail || 'Face enrollment failed');
+
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                log(`✅ ${data.message}`, 'success');
+                log(`👤 User ID: ${data.user_id}`, 'success');
+                log(`🆔 Face ID: ${data.face_id}`, 'success');
+                log(`📊 Quality Score: ${data.quality_score.toFixed(2)}`, 'success');
+                log(`${data.liveness_passed ? '✅' : '❌'} Liveness Check: ${data.liveness_passed ? 'PASSED' : 'FAILED'}`, data.liveness_passed ? 'success' : 'error');
+                log('🔐 Face embedding encrypted and stored', 'success');
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+                // Reset form
+                fileInput.value = '';
+                document.getElementById('face-name').value = '';
+                document.getElementById('face-phone').value = '';
+                document.getElementById('face-address').value = '';
+            } catch (e) {
+                log(`❌ Face enrollment error: ${e.message}`, 'error');
+            }
+        }
+
+        async function submitFaceVerification() {
+            const fileInput = document.getElementById('face-verify-file');
+            const userId = document.getElementById('face-verify-user-id').value;
+
+            if (!fileInput.files[0]) {
+                log('Please select a face image first', 'error');
+                return;
+            }
+            if (!userId) {
+                log('Please enter User ID to verify', 'error');
+                return;
+            }
+
+            if (!token) {
+                log('❌ Not authenticated. Please login first!', 'error');
+                return;
+            }
+
+            const orderId = document.getElementById('face-verify-order-id').value;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('user_id', userId);
+            if (orderId) formData.append('order_id', orderId);
+
+            try {
+                log('🔍 Verifying face against stored template...');
+                const res = await fetch(`${API_URL}/face/verify`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail?.error || data.detail || 'Face verification failed');
+
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                if (data.verified) {
+                    log(`✅ FACE VERIFIED SUCCESSFULLY!`, 'success');
+                    log(`👤 User ID ${userId} identity confirmed`, 'success');
+                } else {
+                    log(`❌ FACE VERIFICATION FAILED`, 'error');
+                    log(`👤 User ID ${userId} not matched`, 'error');
+                }
+                
+                log(`📊 Similarity Score: ${(data.similarity_score * 100).toFixed(1)}%`, data.verified ? 'success' : 'error');
+                log(`🎯 Threshold: ${(data.threshold * 100).toFixed(1)}%`, 'info');
+                log(`📈 Confidence: ${(data.confidence * 100).toFixed(1)}%`, data.verified ? 'success' : 'error');
+                
+                if (data.quality_score !== null) {
+                    log(`🖼️ Face Quality: ${data.quality_score.toFixed(2)}`, 'info');
+                }
+                
+                if (data.liveness_passed !== null) {
+                    log(`${data.liveness_passed ? '✅' : '❌'} Liveness Check: ${data.liveness_passed ? 'PASSED' : 'FAILED'}`, data.liveness_passed ? 'success' : 'error');
+                }
+                
+                log(`💬 ${data.message}`, data.verified ? 'success' : 'error');
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+                // Reset
+                fileInput.value = '';
+            } catch (e) {
+                log(`❌ Face verification error: ${e.message}`, 'error');
+            }
+        }
+
+        async function submitLockerVerification() {
+            const fileInput = document.getElementById('locker-face-file');
+            const lockerId = document.getElementById('locker-id').value;
+            const userId = document.getElementById('locker-user-id').value;
+
+            if (!fileInput.files[0]) {
+                log('Please select a face image first', 'error');
+                return;
+            }
+            if (!lockerId) {
+                log('Please enter Locker ID', 'error');
+                return;
+            }
+            if (!userId) {
+                log('Please enter User ID', 'error');
+                return;
+            }
+
+            const parcelId = document.getElementById('locker-parcel-id').value;
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('locker_id', lockerId);
+            formData.append('user_id', userId);
+            if (parcelId) formData.append('parcel_id', parcelId);
+
+            try {
+                log('🔒 Verifying face at smart locker (STRICT mode)...');
+                const res = await fetch(`${API_URL}/face/locker/verify`, {
+                    method: 'POST',
+                    body: formData  // No auth needed for locker device
+                });
+
+                const data = await res.json();
+
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                if (data.unlock) {
+                    log(`✅ LOCKER VERIFICATION SUCCESSFUL!`, 'success');
+                    log(`🔓 Unlock token generated`, 'success');
+                    log(`⏱️ Token expires in ${data.expires_in} seconds (${Math.floor(data.expires_in / 60)} minutes)`, 'success');
+                    log(`📊 Confidence: ${(data.confidence * 100).toFixed(1)}%`, 'success');
+                    
+                    // Show token display
+                    showLockerToken(data.token, lockerId);
+                } else {
+                    log(`❌ LOCKER VERIFICATION FAILED`, 'error');
+                    log(`🔒 Locker will remain locked`, 'error');
+                    log(`📊 Confidence: ${(data.confidence * 100).toFixed(1)}%`, 'error');
+                }
+                
+                log(`💬 ${data.message}`, data.unlock ? 'success' : 'error');
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+                // Reset
+                fileInput.value = '';
+            } catch (e) {
+                log(`❌ Locker verification error: ${e.message}`, 'error');
+            }
+        }
+
+        function showLockerToken(token, lockerId) {
+            document.getElementById('locker-token-section').classList.remove('hidden');
+            document.getElementById('locker-token-display').textContent = token;
+            
+            // Store for unlock
+            window.currentLockerToken = token;
+            window.currentLockerId = lockerId;
+            
+            // Scroll to token section
+            document.getElementById('locker-token-section').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function closeTokenDisplay() {
+            document.getElementById('locker-token-section').classList.add('hidden');
+            window.currentLockerToken = null;
+            window.currentLockerId = null;
+        }
+
+        // ================================
+        // SINHALA VOICE ASSISTANT FUNCTIONS
+        // ================================
+
+        let recordingTimer = null;
+        let recordingStartTime = 0;
+        let isRecording = false;
+
+        async function toggleVoiceRecording() {
+            if (!isRecording) {
+                await startRecording();
+            } else {
+                await stopRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                // Request microphone access
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Create MediaRecorder
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    // Create audio blob
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    
+                    // Submit to backend
+                    await processRecordedAudio(audioBlob);
+                    
+                    // Stop all tracks
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                // Start recording
+                mediaRecorder.start();
+                isRecording = true;
+                recordingStartTime = Date.now();
+                
+                // Update UI
+                document.getElementById('voice-record-btn').textContent = '⏹️ Stop Speaking';
+                document.getElementById('voice-record-btn').style.backgroundColor = '#28a745';
+                document.getElementById('voice-cancel-btn').classList.remove('hidden');
+                document.getElementById('recording-status').textContent = '🔴 Recording...';
+                document.getElementById('recording-status').style.color = '#dc3545';
+                document.getElementById('recording-timer').classList.remove('hidden');
+                
+                // Start timer
+                recordingTimer = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                    const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                    const seconds = (elapsed % 60).toString().padStart(2, '0');
+                    document.getElementById('recording-timer').textContent = `${minutes}:${seconds}`;
+                }, 100);
+                
+                log('🎙️ Recording started - Speak now!', 'success');
+                
+            } catch (error) {
+                log(`❌ Microphone access denied: ${error.message}`, 'error');
+                alert('Please allow microphone access to use voice assistant');
+            }
+        }
+
+        async function stopRecording() {
+            if (!mediaRecorder || !isRecording) return;
+            
+            // Stop recording
+            mediaRecorder.stop();
+            isRecording = false;
+            
+            // Clear timer
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            
+            // Update UI
+            document.getElementById('voice-record-btn').textContent = '🎙️ Hold to Speak';
+            document.getElementById('voice-record-btn').style.backgroundColor = '#dc3545';
+            document.getElementById('voice-cancel-btn').classList.add('hidden');
+            document.getElementById('recording-status').textContent = '⏳ Processing...';
+            document.getElementById('recording-status').style.color = '#ff9800';
+            document.getElementById('recording-timer').classList.add('hidden');
+            
+            log('⏹️ Recording stopped - Processing...', 'success');
+        }
+
+        function cancelRecording() {
+            if (!mediaRecorder) return;
+            
+            // Stop recording without processing
+            if (isRecording && mediaRecorder.state === 'recording') {
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                mediaRecorder = null;
+                isRecording = false;
+                audioChunks = [];
+            }
+            
+            // Clear timer
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            
+            // Reset UI
+            document.getElementById('voice-record-btn').textContent = '🎙️ Hold to Speak';
+            document.getElementById('voice-record-btn').style.backgroundColor = '#dc3545';
+            document.getElementById('voice-cancel-btn').classList.add('hidden');
+            document.getElementById('recording-status').textContent = '🎤 Ready to listen';
+            document.getElementById('recording-status').style.color = '#666';
+            document.getElementById('recording-timer').classList.add('hidden');
+            
+            log('❌ Recording cancelled', 'error');
+        }
+
+        async function processRecordedAudio(audioBlob) {
+            try {
+                // Create FormData
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'recording.wav');
+
+                log('🎤 Processing your voice query...');
+                
+                const res = await fetch(`${API_URL}/assistant/query/voice`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+
+                const data = await res.json();
+
+                // Reset UI
+                document.getElementById('recording-status').textContent = '🎤 Ready to listen';
+                document.getElementById('recording-status').style.color = '#666';
+
+                if (data.success) {
+                    log(`✅ Voice query processed successfully`, 'success');
+                    log(`📝 You said: "${data.transcript}"`, 'success');
+                    log(`🤖 Assistant: "${data.response_text}"`, 'success');
+                    
+                    // Show response in UI
+                    document.getElementById('assistant-response').classList.remove('hidden');
+                    document.getElementById('assistant-user-text').textContent = data.transcript;
+                    document.getElementById('assistant-response-text').textContent = data.response_text;
+                    
+                    // Scroll to response
+                    document.getElementById('assistant-response').scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    log(`❌ Assistant error: ${data.error}`, 'error');
+                    document.getElementById('recording-status').textContent = '❌ Error - Try again';
+                    document.getElementById('recording-status').style.color = '#dc3545';
+                }
+
+            } catch (error) {
+                log(`❌ Processing error: ${error.message}`, 'error');
+                document.getElementById('recording-status').textContent = '❌ Error - Try again';
+                document.getElementById('recording-status').style.color = '#dc3545';
+            }
+        }
+
+        async function submitVoiceAssistantQuery() {
+            const fileInput = document.getElementById('assistant-audio-file');
+            if (!fileInput.files.length) {
+                alert('Please select an audio file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                log('🎤 Processing Sinhala voice query...');
+                const res = await fetch(`${API_URL}/assistant/query/voice`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    log(`✅ Voice query processed successfully`, 'success');
+                    log(`📝 You said: "${data.transcript}"`, 'success');
+                    log(`🤖 Assistant: "${data.response_text}"`, 'success');
+                    
+                    // Show response in UI
+                    document.getElementById('assistant-response').classList.remove('hidden');
+                    document.getElementById('assistant-user-text').textContent = data.transcript;
+                    document.getElementById('assistant-response-text').textContent = data.response_text;
+                    
+                    // Scroll to response
+                    document.getElementById('assistant-response').scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    log(`❌ Assistant error: ${data.error}`, 'error');
+                }
+
+                // Reset
+                fileInput.value = '';
+            } catch (e) {
+                log(`❌ Voice assistant error: ${e.message}`, 'error');
+            }
+        }
+
+        async function submitTextAssistantQuery() {
+            const textInput = document.getElementById('assistant-text-input');
+            const text = textInput.value.trim();
+            
+            if (!text) {
+                alert('Please enter a question');
+                return;
+            }
+
+            try {
+                log(`💬 Asking assistant: "${text}"`);
+                const res = await fetch(`${API_URL}/assistant/query/text`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    log(`✅ Text query processed successfully`, 'success');
+                    log(`🤖 Assistant: "${data.response_text}"`, 'success');
+                    
+                    // Show response in UI
+                    document.getElementById('assistant-response').classList.remove('hidden');
+                    document.getElementById('assistant-user-text').textContent = text;
+                    document.getElementById('assistant-response-text').textContent = data.response_text;
+                    
+                    // Scroll to response
+                    document.getElementById('assistant-response').scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    log(`❌ Assistant error: ${data.error}`, 'error');
+                }
+
+                // Clear input
+                textInput.value = '';
+            } catch (e) {
+                log(`❌ Text assistant error: ${e.message}`, 'error');
+            }
+        }
+
+        async function resetAssistantConversation() {
+            try {
+                log('🔄 Resetting assistant conversation...');
+                const res = await fetch(`${API_URL}/assistant/reset-conversation`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    log('✅ Conversation reset successfully', 'success');
+                    document.getElementById('assistant-response').classList.add('hidden');
+                } else {
+                    log(`❌ Reset failed`, 'error');
+                }
+            } catch (e) {
+                log(`❌ Reset error: ${e.message}`, 'error');
+            }
+        }
+
+        function closeTokenDisplay() {
+            document.getElementById('locker-token-section').classList.add('hidden');
+            window.currentLockerToken = null;
+            window.currentLockerId = null;
+        }
+
+        async function unlockLocker() {
+            if (!window.currentLockerToken || !window.currentLockerId) {
+                log('No active unlock token', 'error');
+                return;
+            }
+
+            try {
+                log('🔓 Unlocking locker...');
+                const res = await fetch(`${API_URL}/face/locker/unlock`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        token: window.currentLockerToken,
+                        locker_id: window.currentLockerId
+                    })
+                });
+
+                const data = await res.json();
+
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                
+                if (data.success) {
+                    log(`✅ ${data.message}`, 'success');
+                    log(`🔓 Locker ${data.locker_id} unlocked successfully!`, 'success');
+                    log(`📋 Status: ${data.status}`, 'success');
+                    
+                    // Close token display
+                    closeTokenDisplay();
+                } else {
+                    log(`❌ ${data.message}`, 'error');
+                    log(`📋 Status: ${data.status}`, 'error');
+                }
+                
+                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            } catch (e) {
+                log(`❌ Unlock error: ${e.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

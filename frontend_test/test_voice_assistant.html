@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎤 Voice Assistant Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .button-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 15px;
+            font-size: 18px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        .record-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        .record-btn:hover {
+            transform: scale(1.05);
+        }
+        .record-btn.recording {
+            animation: pulse 1s infinite;
+            background: #f5576c;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .text-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+        }
+        .text-btn:hover {
+            transform: scale(1.05);
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .result.show {
+            display: block;
+        }
+        .result.success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+        }
+        .result.error {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.ready {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.recording {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .examples {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .examples h3 {
+            margin-top: 0;
+            color: #667eea;
+        }
+        .examples ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .examples li {
+            margin: 5px 0;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Sinhala Voice Assistant</h1>
+        <div class="subtitle">Test your courier assistant - Voice & Text</div>
+
+        <div class="status ready" id="status">✅ Ready to test</div>
+
+        <div class="button-container">
+            <button class="record-btn" id="recordBtn" onclick="toggleRecording()">
+                🎤 Press to Speak
+            </button>
+
+            <div style="text-align: center; color: #999;">OR</div>
+
+            <textarea id="textInput" rows="3" placeholder="Type your query in Sinhala or English..." autofocus></textarea>
+            <button class="text-btn" onclick="sendTextQuery()">
+                💬 Send Text Query
+            </button>
+        </div>
+
+        <div class="result" id="result"></div>
+
+        <div class="examples">
+            <h3>📝 Try These Examples:</h3>
+            <ul>
+                <li><strong>Sinhala:</strong> "මගේ පැකේජය ගැන කියන්න"</li>
+                <li><strong>English:</strong> "Tell me about TRK001"</li>
+                <li><strong>Mixed:</strong> "TRK002 koheda?"</li>
+                <li><strong>Tracking:</strong> "Track TRK003"</li>
+                <li><strong>Rate:</strong> "Colombo to Kandy rate?"</li>
+            </ul>
+            <p style="margin: 10px 0; color: #666;">
+                <strong>Available IDs:</strong> TRK001, TRK002, TRK003, TRK004, TRK005
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/assistant';
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        function updateStatus(message, type = 'ready') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function showResult(message, type = 'success') {
+            const result = document.getElementById('result');
+            result.textContent = message;
+            result.className = `result show ${type}`;
+        }
+
+        async function toggleRecording() {
+            if (!isRecording) {
+                await startRecording();
+            } else {
+                await stopRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        channelCount: 1,  // Mono
+                        sampleRate: 16000  // 16kHz
+                    } 
+                });
+                
+                // Try to use WAV format if supported, otherwise use webm
+                const mimeType = MediaRecorder.isTypeSupported('audio/wav') ? 'audio/wav' : 'audio/webm';
+                mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    await sendVoiceQuery(audioBlob);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                
+                document.getElementById('recordBtn').classList.add('recording');
+                document.getElementById('recordBtn').textContent = '⏹️ Stop Recording';
+                updateStatus('🎤 Recording... Speak now!', 'recording');
+                
+            } catch (error) {
+                showResult('❌ Microphone access denied: ' + error.message, 'error');
+            }
+        }
+
+        async function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                document.getElementById('recordBtn').classList.remove('recording');
+                document.getElementById('recordBtn').textContent = '🎤 Press to Speak';
+                updateStatus('⏳ Processing...', 'recording');
+            }
+        }
+
+        async function sendVoiceQuery(audioBlob) {
+            try {
+                const formData = new FormData();
+                // Use appropriate file extension based on blob type
+                const fileName = audioBlob.type.includes('wav') ? 'recording.wav' : 'recording.webm';
+                formData.append('file', audioBlob, fileName);
+                
+                const response = await fetch(`${API_URL}/query/voice`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    showResult(
+                        `🗣️ You said: "${data.transcript}"\n\n` +
+                        `🤖 Assistant: ${data.response_text}`,
+                        'success'
+                    );
+                    updateStatus('✅ Ready to test', 'ready');
+                    
+                    // Play audio response if available
+                    if (data.response_audio) {
+                        playAudioResponse(data.response_audio);
+                    }
+                } else {
+                    showResult('❌ Error: ' + (data.error || data.detail || 'Unknown error'), 'error');
+                    updateStatus('✅ Ready to test', 'ready');
+                }
+                
+            } catch (error) {
+                showResult('❌ Network error: ' + error.message, 'error');
+                updateStatus('✅ Ready to test', 'ready');
+            }
+        }
+
+        function playAudioResponse(base64Audio) {
+            try {
+                // Convert base64 to audio and play
+                const audio = new Audio('data:audio/mp3;base64,' + base64Audio);
+                audio.play();
+                updateStatus('🔊 Playing response...', 'recording');
+                
+                audio.onended = () => {
+                    updateStatus('✅ Ready to test', 'ready');
+                };
+                
+                audio.onerror = (error) => {
+                    console.error('Audio playback error:', error);
+                    updateStatus('✅ Ready to test', 'ready');
+                };
+            } catch (error) {
+                console.error('Failed to play audio:', error);
+            }
+        }
+
+        async function sendTextQuery() {
+            const text = document.getElementById('textInput').value.trim();
+            
+            if (!text) {
+                showResult('❌ Please enter a query', 'error');
+                return;
+            }
+            
+            updateStatus('⏳ Processing...', 'recording');
+            
+            try {
+                const response = await fetch(`${API_URL}/query/text`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text: text })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    showResult(
+                        `💬 You asked: "${text}"\n\n` +
+                        `🤖 Assistant: ${data.response_text}`,
+                        'success'
+                    );
+                    updateStatus('✅ Ready to test', 'ready');
+                    document.getElementById('textInput').value = '';
+                } else {
+                    showResult('❌ Error: ' + (data.error || data.detail || 'Unknown error'), 'error');
+                    updateStatus('✅ Ready to test', 'ready');
+                }
+                
+            } catch (error) {
+                showResult('❌ Network error: ' + error.message, 'error');
+                updateStatus('✅ Ready to test', 'ready');
+            }
+        }
+
+        // Allow Enter to send text query
+        document.getElementById('textInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendTextQuery();
+            }
+        });
+
+        // Check if server is running
+        fetch('http://localhost:8000/health')
+            .then(r => r.json())
+            .then(() => updateStatus('✅ Connected to server', 'ready'))
+            .catch(() => showResult('⚠️ Server not running. Start it with: python run.py', 'error'));
+    </script>
+</body>
+</html>
