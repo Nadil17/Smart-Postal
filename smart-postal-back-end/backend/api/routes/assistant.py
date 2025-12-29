@@ -51,6 +51,100 @@ router = APIRouter(prefix="/api/assistant", tags=["Sinhala Assistant"])
 settings = get_settings()
 
 
+def synthesize_gemini_tts(text: str, voice_name: str = "Achernar", prompt: str = "Read aloud in a warm, friendly tone.") -> Optional[bytes]:
+    """
+    Use Google Cloud TTS v1beta1 API with Gemini 2.5 Pro TTS model for high-quality Sinhala speech.
+    This is the BEST quality option for Sinhala pronunciation.
+    
+    Uses OAuth2 service account authentication for Vertex AI access.
+    
+    Args:
+        text: The Sinhala text to synthesize
+        voice_name: One of the Gemini voices (Achernar, Achird, Charon, Fenrir, Kore, Puck, etc.)
+        prompt: Style prompt for how to read the text
+    
+    Returns:
+        Audio bytes (MP3 format) or None if failed
+    """
+    import requests
+    import json
+    from pathlib import Path
+    
+    # Try to use service account for OAuth2 authentication (required for Vertex AI / Gemini TTS)
+    service_account_path = Path(__file__).parent.parent.parent / "config" / "vertex-service-account.json"
+    
+    access_token = None
+    if service_account_path.exists():
+        try:
+            from google.oauth2 import service_account
+            from google.auth.transport.requests import Request
+            
+            credentials = service_account.Credentials.from_service_account_file(
+                str(service_account_path),
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            credentials.refresh(Request())
+            access_token = credentials.token
+            logger.info(f"🔑 Using service account OAuth2 for Gemini TTS")
+        except Exception as auth_err:
+            logger.warning(f"Service account auth failed: {auth_err}")
+    
+    if not access_token:
+        # Fallback to API key (may not work for Gemini model)
+        api_key = settings.GOOGLE_CLOUD_TTS_API_KEY or os.getenv("GOOGLE_CLOUD_TTS_API_KEY")
+        if not api_key:
+            logger.warning("No service account or API key found for Gemini TTS")
+            return None
+        url = f"https://texttospeech.googleapis.com/v1beta1/text:synthesize?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+    else:
+        # Use OAuth2 token
+        url = "https://texttospeech.googleapis.com/v1beta1/text:synthesize"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+    
+    payload = {
+        "audioConfig": {
+            "audioEncoding": "MP3",
+            "pitch": 0,
+            "speakingRate": 1
+        },
+        "input": {
+            "text": text,
+            "prompt": prompt
+        },
+        "voice": {
+            "languageCode": "si-LK",
+            "modelName": "gemini-2.5-pro-tts",
+            "name": voice_name
+        }
+    }
+    
+    try:
+        logger.info(f"🎯 Calling Gemini 2.5 Pro TTS for Sinhala with voice: {voice_name}")
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            result = response.json()
+            audio_content = result.get("audioContent")
+            if audio_content:
+                audio_bytes = base64.b64decode(audio_content)
+                logger.info(f"✅ Gemini TTS success! Audio size: {len(audio_bytes)} bytes")
+                return audio_bytes
+            else:
+                logger.warning("Gemini TTS response missing audioContent")
+                return None
+        else:
+            logger.warning(f"Gemini TTS API error {response.status_code}: {response.text[:500]}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Gemini TTS request failed: {e}")
+        return None
+
+
 # Initialize bot model and chat session
 _model_instance = None
 _chat_sessions = {}  # Store chat sessions per user
@@ -146,102 +240,44 @@ async def voice_query(
         response_audio = None
         if TTS_AVAILABLE:
             try:
-                # Get engine from settings or env, default to azure
-                engine = getattr(settings, "COURIERBOT_TTS_ENGINE", None)
-                if not engine:
-                    engine = os.getenv("COURIERBOT_TTS_ENGINE", "gtts")
-                engine = engine.lower()
+                # Get configured voice settings
+                gemini_voice = os.getenv("GEMINI_TTS_VOICE", "Kore")  # Kore = warm yet professional
+                azure_voice = os.getenv("AZURE_SPEECH_VOICE", "si-LK-SameeraNeural")
                 
-                logger.info(f"TTS Engine configured: {engine}")
-                logger.info(f"Google TTS available: {GOOGLE_TTS_AVAILABLE}")
-                logger.info(f"Azure SDK available: {AZURE_SDK_AVAILABLE}")
-                logger.info(f"Azure Key set: {bool(settings.AZURE_SPEECH_KEY)}")
-                logger.info(f"Azure Region set: {bool(settings.AZURE_SPEECH_REGION)}")
+                # Professional Sri Lankan customer service agent prompt
+                tts_prompt = """Speak as a professional Sri Lankan postal service customer care representative.
+Use authentic Sri Lankan Sinhala pronunciation with clear, pleasant intonation.
+Maintain a courteous, respectful, and helpful tone - professional but approachable.
+Speak at a measured, confident pace suitable for customer service.
+Be polite and articulate. Avoid being too casual or overly familiar.
+Sound competent, reliable, and service-oriented like a trained customer agent."""
                 
-                # Gemini / Vertex TTS via service account (premium quality!)
-                if engine == "gemini" and GOOGLE_TTS_AVAILABLE:
-                    logger.info("Using Google Cloud TTS with service account - Premium voice")
-                    try:
-                        # Set service account credentials if available
-                        service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-                        if service_account_path:
-                            import pathlib
-                            abs_path = pathlib.Path(__file__).parent.parent.parent / service_account_path
-                            if abs_path.exists():
-                                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(abs_path)
-                        
-                        client = texttospeech.TextToSpeechClient()
-                        synthesis_input = texttospeech.SynthesisInput(text=response_text)
-                        
-                        # Auto-select best voice for Sinhala
-                        voice = texttospeech.VoiceSelectionParams(
-                            language_code="si-LK",
-                            ssml_gender=texttospeech.SsmlVoiceGender.MALE
-                        )
-                        
-                        audio_config = texttospeech.AudioConfig(
-                            audio_encoding=texttospeech.AudioEncoding.MP3,
-                            speaking_rate=0.95,
-                            pitch=-1.0
-                        )
-                        
-                        response_tts = client.synthesize_speech(
-                            input=synthesis_input, voice=voice, audio_config=audio_config
-                        )
-                        
-                        audio_bytes = response_tts.audio_content
+                # === GEMINI 2.5 PRO TTS - PRIMARY (BEST Sinhala Quality!) ===
+                gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+                if gemini_api_key:
+                    logger.info(f"🎯 Trying Gemini 2.5 Pro TTS with voice: {gemini_voice}")
+                    audio_bytes = synthesize_gemini_tts(
+                        text=response_text,
+                        voice_name=gemini_voice,
+                        prompt=tts_prompt
+                    )
+                    if audio_bytes:
                         response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                        logger.info(f"✅ Generated Google TTS audio ({len(audio_bytes)} bytes) - Service Account Premium")
-                        
-                    except Exception as gem_err:
-                        logger.warning(f"Gemini TTS error: {gem_err}")
-                        engine = "google"
-
-                # Google Cloud TTS - fallback
-                if not response_audio and engine == "google" and settings.GOOGLE_CLOUD_TTS_API_KEY and GOOGLE_TTS_AVAILABLE:
-                    logger.info("Using Google Cloud TTS - Standard")
-                    try:
-                        client = texttospeech.TextToSpeechClient(
-                            client_options={"api_key": settings.GOOGLE_CLOUD_TTS_API_KEY}
-                        )
-                        synthesis_input = texttospeech.SynthesisInput(text=response_text)
-                        voice = texttospeech.VoiceSelectionParams(
-                            language_code="si-LK",
-                            ssml_gender=texttospeech.SsmlVoiceGender.MALE
-                        )
-                        audio_config = texttospeech.AudioConfig(
-                            audio_encoding=texttospeech.AudioEncoding.MP3,
-                            speaking_rate=0.95,
-                            pitch=-1.0
-                        )
-                        response_tts = client.synthesize_speech(
-                            input=synthesis_input, voice=voice, audio_config=audio_config
-                        )
-                        audio_bytes = response_tts.audio_content
-                        response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                        logger.info(f"✅ Generated Google TTS audio ({len(audio_bytes)} bytes) - Standard")
-                    except Exception as google_err:
-                        logger.warning(f"Google TTS generation failed: {google_err}")
-                        engine = "azure"
+                        logger.info(f"✅ Generated Gemini TTS audio ({len(audio_bytes)} bytes) - Premium Sinhala!")
                 
-                # Azure TTS if configured and sdk available
-                if not response_audio and engine == "azure" and settings.AZURE_SPEECH_KEY and settings.AZURE_SPEECH_REGION and AZURE_SDK_AVAILABLE:
-                    logger.info("Using Azure TTS with si-LK-SameeraNeural (Male)")
+                # === AZURE TTS - FALLBACK (Good Quality Neural Voice) ===
+                if not response_audio and settings.AZURE_SPEECH_KEY and settings.AZURE_SPEECH_REGION and AZURE_SDK_AVAILABLE:
+                    logger.info(f"Using Azure TTS with {azure_voice} (fallback)")
                     try:
                         speech_config = speechsdk.SpeechConfig(subscription=settings.AZURE_SPEECH_KEY, region=settings.AZURE_SPEECH_REGION)
-                        # Male Sinhala voice (si-LK-SameeraNeural)
-                        speech_config.speech_synthesis_voice_name = "si-LK-SameeraNeural"
+                        speech_config.speech_synthesis_voice_name = azure_voice
                         speech_config.set_speech_synthesis_output_format(
                             speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
                         )
-                        # Use None for audio_config to get audio data directly from result
                         synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
                         
-                        # Create SSML for more natural, native-sounding speech
-                        # rate: 0.9 = slightly slower (more clear)
-                        # pitch: -2% = slightly lower (more natural for male voice)
                         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="si-LK">
-                            <voice name="si-LK-SameeraNeural">
+                            <voice name="{azure_voice}">
                                 <prosody rate="0.9" pitch="-2%">
                                     {response_text}
                                 </prosody>
@@ -250,31 +286,17 @@ async def voice_query(
                         
                         result = synthesizer.speak_ssml_async(ssml).get()
                         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                            # Get audio data directly from result (avoids file locking issues)
                             audio_bytes = result.audio_data
                             response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                            logger.info(f"✅ Generated Azure TTS audio ({len(audio_bytes)} bytes) - Natural Sinhala voice")
+                            logger.info(f"✅ Generated Azure TTS audio ({len(audio_bytes)} bytes) - {azure_voice}")
                         else:
                             logger.warning(f"Azure TTS failed: {result.reason}")
                     except Exception as azure_err:
                         logger.warning(f"Azure TTS generation failed: {azure_err}")
-                        # Fall back to gTTS below if available
-                        engine = "gtts"
-
-                # gTTS fallback
-                if engine == "gtts":
-                    try:
-                        tts = gTTS(text=response_text, lang="si", slow=False)
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
-                            tts.save(temp_audio.name)
-                            temp_audio_path = temp_audio.name
-                        with open(temp_audio_path, "rb") as audio_file:
-                            audio_bytes = audio_file.read()
-                            response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                        os.unlink(temp_audio_path)
-                        logger.info(f"Generated gTTS audio ({len(audio_bytes)} bytes)")
-                    except Exception as tts_error:
-                        logger.warning(f"gTTS generation failed: {tts_error}")
+                
+                # NOTE: Gemini 2.5 Pro TTS is now PRIMARY (above), Azure is FALLBACK
+                # Legacy Google Cloud TTS Neural2 and Standard engines removed (Gemini is better!)
+                
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
 
@@ -341,102 +363,44 @@ async def text_query(
         response_audio = None
         if TTS_AVAILABLE:
             try:
-                # Get engine from settings or env, default to azure
-                engine = getattr(settings, "COURIERBOT_TTS_ENGINE", None)
-                if not engine:
-                    engine = os.getenv("COURIERBOT_TTS_ENGINE", "gtts")
-                engine = engine.lower()
+                # Get configured voice settings
+                gemini_voice = os.getenv("GEMINI_TTS_VOICE", "Kore")  # Kore = warm yet professional
+                azure_voice = os.getenv("AZURE_SPEECH_VOICE", "si-LK-SameeraNeural")
                 
-                logger.info(f"TTS Engine configured: {engine}")
-                logger.info(f"Google TTS available: {GOOGLE_TTS_AVAILABLE}")
-                logger.info(f"Azure SDK available: {AZURE_SDK_AVAILABLE}")
-                logger.info(f"Azure Key set: {bool(settings.AZURE_SPEECH_KEY)}")
-                logger.info(f"Azure Region set: {bool(settings.AZURE_SPEECH_REGION)}")
+                # Professional Sri Lankan customer service agent prompt
+                tts_prompt = """Speak as a professional Sri Lankan postal service customer care representative.
+Use authentic Sri Lankan Sinhala pronunciation with clear, pleasant intonation.
+Maintain a courteous, respectful, and helpful tone - professional but approachable.
+Speak at a measured, confident pace suitable for customer service.
+Be polite and articulate. Avoid being too casual or overly familiar.
+Sound competent, reliable, and service-oriented like a trained customer agent."""
                 
-                # Gemini / Vertex TTS via service account (premium quality!)
-                if engine == "gemini" and GOOGLE_TTS_AVAILABLE:
-                    logger.info("Using Google Cloud TTS with service account - Premium voice")
-                    try:
-                        # Set service account credentials if available
-                        service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-                        if service_account_path:
-                            import pathlib
-                            abs_path = pathlib.Path(__file__).parent.parent.parent / service_account_path
-                            if abs_path.exists():
-                                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(abs_path)
-                        
-                        client = texttospeech.TextToSpeechClient()
-                        synthesis_input = texttospeech.SynthesisInput(text=response_text)
-                        
-                        # Auto-select best voice for Sinhala
-                        voice = texttospeech.VoiceSelectionParams(
-                            language_code="si-LK",
-                            ssml_gender=texttospeech.SsmlVoiceGender.MALE
-                        )
-                        
-                        audio_config = texttospeech.AudioConfig(
-                            audio_encoding=texttospeech.AudioEncoding.MP3,
-                            speaking_rate=0.95,
-                            pitch=-1.0
-                        )
-                        
-                        response_tts = client.synthesize_speech(
-                            input=synthesis_input, voice=voice, audio_config=audio_config
-                        )
-                        
-                        audio_bytes = response_tts.audio_content
+                # === GEMINI 2.5 PRO TTS - PRIMARY (BEST Sinhala Quality!) ===
+                gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+                if gemini_api_key:
+                    logger.info(f"🎯 Trying Gemini 2.5 Pro TTS with voice: {gemini_voice}")
+                    audio_bytes = synthesize_gemini_tts(
+                        text=response_text,
+                        voice_name=gemini_voice,
+                        prompt=tts_prompt
+                    )
+                    if audio_bytes:
                         response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                        logger.info(f"✅ Generated Google TTS audio ({len(audio_bytes)} bytes) - Service Account Premium")
-                        
-                    except Exception as gem_err:
-                        logger.warning(f"Gemini TTS error: {gem_err}")
-                        engine = "google"
-
-                # Google Cloud TTS - fallback
-                if not response_audio and engine == "google" and settings.GOOGLE_CLOUD_TTS_API_KEY and GOOGLE_TTS_AVAILABLE:
-                    logger.info("Using Google Cloud TTS - Standard")
-                    try:
-                        client = texttospeech.TextToSpeechClient(
-                            client_options={"api_key": settings.GOOGLE_CLOUD_TTS_API_KEY}
-                        )
-                        synthesis_input = texttospeech.SynthesisInput(text=response_text)
-                        voice = texttospeech.VoiceSelectionParams(
-                            language_code="si-LK",
-                            ssml_gender=texttospeech.SsmlVoiceGender.MALE
-                        )
-                        audio_config = texttospeech.AudioConfig(
-                            audio_encoding=texttospeech.AudioEncoding.MP3,
-                            speaking_rate=0.95,
-                            pitch=-1.0
-                        )
-                        response_tts = client.synthesize_speech(
-                            input=synthesis_input, voice=voice, audio_config=audio_config
-                        )
-                        audio_bytes = response_tts.audio_content
-                        response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                        logger.info(f"✅ Generated Google TTS audio ({len(audio_bytes)} bytes) - Standard")
-                    except Exception as google_err:
-                        logger.warning(f"Google TTS generation failed: {google_err}")
-                        engine = "azure"
+                        logger.info(f"✅ Generated Gemini TTS audio ({len(audio_bytes)} bytes) - Premium Sinhala!")
                 
-                # Azure TTS if configured and sdk available
-                if not response_audio and engine == "azure" and settings.AZURE_SPEECH_KEY and settings.AZURE_SPEECH_REGION and AZURE_SDK_AVAILABLE:
-                    logger.info("Using Azure TTS with si-LK-SameeraNeural (Male)")
+                # === AZURE TTS - FALLBACK (Good Quality Neural Voice) ===
+                if not response_audio and settings.AZURE_SPEECH_KEY and settings.AZURE_SPEECH_REGION and AZURE_SDK_AVAILABLE:
+                    logger.info(f"Using Azure TTS with {azure_voice} (fallback)")
                     try:
                         speech_config = speechsdk.SpeechConfig(subscription=settings.AZURE_SPEECH_KEY, region=settings.AZURE_SPEECH_REGION)
-                        # Male Sinhala voice (si-LK-SameeraNeural)
-                        speech_config.speech_synthesis_voice_name = "si-LK-SameeraNeural"
+                        speech_config.speech_synthesis_voice_name = azure_voice
                         speech_config.set_speech_synthesis_output_format(
                             speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
                         )
-                        # Use None for audio_config to get audio data directly from result
                         synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
                         
-                        # Create SSML for more natural, native-sounding speech
-                        # rate: 0.9 = slightly slower (more clear)
-                        # pitch: -2% = slightly lower (more natural for male voice)
                         ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="si-LK">
-                            <voice name="si-LK-SameeraNeural">
+                            <voice name="{azure_voice}">
                                 <prosody rate="0.9" pitch="-2%">
                                     {response_text}
                                 </prosody>
@@ -445,31 +409,17 @@ async def text_query(
                         
                         result = synthesizer.speak_ssml_async(ssml).get()
                         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                            # Get audio data directly from result (avoids file locking issues)
                             audio_bytes = result.audio_data
                             response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                            logger.info(f"✅ Generated Azure TTS audio ({len(audio_bytes)} bytes) - Natural Sinhala voice")
+                            logger.info(f"✅ Generated Azure TTS audio ({len(audio_bytes)} bytes) - {azure_voice}")
                         else:
                             logger.warning(f"Azure TTS failed: {result.reason}")
                     except Exception as azure_err:
                         logger.warning(f"Azure TTS generation failed: {azure_err}")
-                        # Fall back to gTTS below if available
-                        engine = "gtts"
-
-                # gTTS fallback
-                if engine == "gtts":
-                    try:
-                        tts = gTTS(text=response_text, lang="si", slow=False)
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
-                            tts.save(temp_audio.name)
-                            temp_audio_path = temp_audio.name
-                        with open(temp_audio_path, "rb") as audio_file:
-                            audio_bytes = audio_file.read()
-                            response_audio = base64.b64encode(audio_bytes).decode('utf-8')
-                        os.unlink(temp_audio_path)
-                        logger.info(f"Generated gTTS audio ({len(audio_bytes)} bytes)")
-                    except Exception as tts_error:
-                        logger.warning(f"gTTS generation failed: {tts_error}")
+                
+                # NOTE: Gemini 2.5 Pro TTS is now PRIMARY (above), Azure is FALLBACK
+                # Legacy Google Cloud TTS Neural2 and Standard engines removed (Gemini is better!)
+                
             except Exception as tts_error:
                 logger.warning(f"TTS generation failed: {tts_error}")
         
