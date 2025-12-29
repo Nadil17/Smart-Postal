@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: Optional[str] = None
     TWILIO_PHONE_NUMBER: Optional[str] = None
     
+    # Azure TTS (optional)
+    AZURE_SPEECH_KEY: Optional[str] = None
+    AZURE_SPEECH_REGION: Optional[str] = None
+    
+    # Google Cloud TTS (classic API)
+    GOOGLE_CLOUD_TTS_API_KEY: Optional[str] = None
+
+    # Gemini / Vertex TTS (premium voices)
+    GEMINI_TTS_MODEL: Optional[str] = "gemini-2.5-pro-tts"
+    GEMINI_TTS_VOICE: Optional[str] = "Achernar"
+
+    # TTS Engine: 'gemini', 'google', 'azure', or 'gtts'
+    COURIERBOT_TTS_ENGINE: Optional[str] = None
+    
     class Config:
         env_file = "config/.env"
         case_sensitive = True
