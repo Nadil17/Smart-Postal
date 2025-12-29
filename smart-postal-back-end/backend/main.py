@@ -3,22 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import time
+import os
 from loguru import logger
 
 from config.settings import get_settings
-from models.database import engine, Base
-from models import User, Order, VoiceTemplate, FingerprintTemplate, FaceTemplate, VerificationLog, Delivery
-from api.routes import auth, users, orders, voice, face, assistant
+# from models.database import engine, Base
+# from models import User, Order, VoiceTemplate, FingerprintTemplate, FaceTemplate, VerificationLog, Delivery
+from api.routes import assistant  # Only assistant route for Azure TTS testing
 
 settings = get_settings()
 
 # Create database tables
-try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created/verified successfully")
-except Exception as e:
-    logger.error(f"Database connection failed: {e}")
-    logger.warning("Continuing without database - some features may not work")
+# try:
+#     Base.metadata.create_all(bind=engine)
+#     logger.info("Database tables created/verified successfully")
+# except Exception as e:
+#     logger.error(f"Database connection failed: {e}")
+#     logger.warning("Continuing without database - some features may not work")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -75,11 +76,15 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Health check endpoint
 @app.get("/health")
 async def health_check():
+    from config.settings import get_settings
+    settings = get_settings()
     return {
         "status": "healthy",
         "app_name": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "environment": settings.ENVIRONMENT
+        "environment": settings.ENVIRONMENT,
+        "azure_tts_configured": bool(settings.AZURE_SPEECH_KEY and settings.AZURE_SPEECH_REGION),
+        "tts_engine": getattr(settings, "COURIERBOT_TTS_ENGINE", None) or os.getenv("COURIERBOT_TTS_ENGINE", "not_set")
     }
 
 # Root endpoint
@@ -92,12 +97,12 @@ async def root():
         "health": "/health"
     }
 
-# Include routers
-app.include_router(auth.router)
-app.include_router(users.router)
-app.include_router(orders.router)
-app.include_router(voice.router)
-app.include_router(face.router)
+# Include routers - Only assistant for Azure TTS testing
+# app.include_router(auth.router)
+# app.include_router(users.router)
+# app.include_router(orders.router)
+# app.include_router(voice.router)
+# app.include_router(face.router)
 # Try loading assistant router carefully
 try:
     app.include_router(assistant.router)

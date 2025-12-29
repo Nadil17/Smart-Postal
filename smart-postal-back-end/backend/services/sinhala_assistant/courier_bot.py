@@ -135,7 +135,13 @@ logger = logging.getLogger("courierbot")
 
 def load_env() -> None:
     """Load environment variables for API credentials."""
-    load_dotenv()
+    # Load from backend/config/.env
+    config_env = PROJECT_ROOT.parent.parent / "config" / ".env"
+    if config_env.exists():
+        load_dotenv(config_env)
+    else:
+        load_dotenv()  # Fallback to default behavior
+    
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         raise EnvironmentError("GEMINI_API_KEY is not set. Please create a .env file with the key.")
