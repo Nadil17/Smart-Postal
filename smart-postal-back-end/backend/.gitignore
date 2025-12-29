@@ -1,0 +1,11 @@
+
+# Service Account Keys
+config/service-account-key.json
+config/*.json
+
+# Test Files
+test_*.mp3
+test_*.py
+
+# Scripts
+scripts/test_*.py

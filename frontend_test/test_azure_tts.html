@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Azure TTS Test</title>
+    <style>
+        body {
+            font-family: Arial;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            cursor: pointer;
+            margin: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            background: #f0f0f0;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 2px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎙️ Azure TTS Direct Test</h1>
+    <p>This bypasses any caching and tests Azure TTS directly</p>
+    
+    <textarea id="text" rows="3" placeholder="Enter Sinhala text...">මගේ පැකේජය ගැන කියන්න</textarea>
+    <br>
+    <button onclick="testTextQuery()">Send Text Query</button>
+    <button onclick="testServer()">Test Server Connection</button>
+    
+    <div id="status">Ready...</div>
+    
+    <script>
+        const API = 'http://localhost:8000';
+        
+        async function testServer() {
+            const status = document.getElementById('status');
+            try {
+                const response = await fetch(`${API}/health`);
+                const data = await response.json();
+                status.innerHTML = `<strong>✅ Server Connected!</strong><br>` +
+                    `Azure TTS Configured: ${data.azure_tts_configured}<br>` +
+                    `TTS Engine: ${data.tts_engine}<br>` +
+                    JSON.stringify(data, null, 2);
+                status.style.background = '#d4edda';
+            } catch (e) {
+                status.innerHTML = `❌ Server Error: ${e.message}`;
+                status.style.background = '#f8d7da';
+            }
+        }
+        
+        async function testTextQuery() {
+            const status = document.getElementById('status');
+            const text = document.getElementById('text').value;
+            
+            if (!text) {
+                status.innerHTML = '❌ Please enter some text';
+                return;
+            }
+            
+            status.innerHTML = '⏳ Sending request...';
+            status.style.background = '#fff3cd';
+            
+            try {
+                const response = await fetch(`${API}/api/assistant/query/text`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.innerHTML = `<strong>✅ Success!</strong><br>` +
+                        `<strong>Transcript:</strong> ${data.transcript || text}<br>` +
+                        `<strong>Response:</strong> ${data.response_text}<br><br>` +
+                        `<strong>Audio received:</strong> ${data.response_audio ? 'YES (base64 length: ' + data.response_audio.length + ')' : 'NO'}`;
+                    status.style.background = '#d4edda';
+                    
+                    // Play audio
+                    if (data.response_audio) {
+                        const audio = new Audio('data:audio/mp3;base64,' + data.response_audio);
+                        audio.play();
+                        audio.onended = () => console.log('Audio playback finished');
+                    }
+                } else {
+                    status.innerHTML = `❌ Error: ${data.error || data.detail}`;
+                    status.style.background = '#f8d7da';
+                }
+            } catch (e) {
+                status.innerHTML = `❌ Network Error: ${e.message}`;
+                status.style.background = '#f8d7da';
+            }
+        }
+        
+        // Test server on load
+        testServer();
+    </script>
+</body>
+</html>
