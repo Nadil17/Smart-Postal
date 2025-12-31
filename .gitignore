@@ -66,3 +66,10 @@ htmlcov/
 # OS specific
 Thumbs.db
 Desktop.ini
+
+# Markdown files
+*.md
+!README.md
+
+#mp3 files
+*.mp3
