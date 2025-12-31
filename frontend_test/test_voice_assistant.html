@@ -321,8 +321,14 @@
                         `🤖 Assistant: ${data.response_text}`,
                         'success'
                     );
-                    updateStatus('✅ Ready to test', 'ready');
                     document.getElementById('textInput').value = '';
+                    
+                    // Play audio response if available
+                    if (data.response_audio) {
+                        playAudioResponse(data.response_audio);
+                    } else {
+                        updateStatus('✅ Ready to test', 'ready');
+                    }
                 } else {
                     showResult('❌ Error: ' + (data.error || data.detail || 'Unknown error'), 'error');
                     updateStatus('✅ Ready to test', 'ready');
