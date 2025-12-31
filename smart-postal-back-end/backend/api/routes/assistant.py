@@ -244,13 +244,14 @@ async def voice_query(
                 gemini_voice = os.getenv("GEMINI_TTS_VOICE", "Kore")  # Kore = warm yet professional
                 azure_voice = os.getenv("AZURE_SPEECH_VOICE", "si-LK-SameeraNeural")
                 
-                # Professional Sri Lankan customer service agent prompt
-                tts_prompt = """Speak as a professional Sri Lankan postal service customer care representative.
-Use authentic Sri Lankan Sinhala pronunciation with clear, pleasant intonation.
-Maintain a courteous, respectful, and helpful tone - professional but approachable.
-Speak at a measured, confident pace suitable for customer service.
-Be polite and articulate. Avoid being too casual or overly familiar.
-Sound competent, reliable, and service-oriented like a trained customer agent."""
+                # Professional native Sinhala speaker prompt with authentic pronunciation
+                tts_prompt = """Speak as a native Sri Lankan Sinhala speaker with authentic pronunciation and natural intonation.
+Use pure Sinhala phonetics - not Tamil, Hindi, or any Indian accent.
+Pronounce each Sinhala syllable clearly with proper stress and rhythm patterns natural to Sinhala.
+Maintain a professional, polished customer service tone - courteous, confident, and articulate.
+Speak with the refinement of a well-educated Sinhala speaker providing professional assistance.
+Use a calm, steady, moderate volume with clear enunciation suitable for business communication.
+Avoid being too loud or aggressive - maintain a gentle but professional demeanor."""
                 
                 # === GEMINI 2.5 PRO TTS - PRIMARY (BEST Sinhala Quality!) ===
                 gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -367,13 +368,14 @@ async def text_query(
                 gemini_voice = os.getenv("GEMINI_TTS_VOICE", "Kore")  # Kore = warm yet professional
                 azure_voice = os.getenv("AZURE_SPEECH_VOICE", "si-LK-SameeraNeural")
                 
-                # Professional Sri Lankan customer service agent prompt
-                tts_prompt = """Speak as a professional Sri Lankan postal service customer care representative.
-Use authentic Sri Lankan Sinhala pronunciation with clear, pleasant intonation.
-Maintain a courteous, respectful, and helpful tone - professional but approachable.
-Speak at a measured, confident pace suitable for customer service.
-Be polite and articulate. Avoid being too casual or overly familiar.
-Sound competent, reliable, and service-oriented like a trained customer agent."""
+                # Professional native Sinhala speaker prompt with authentic pronunciation
+                tts_prompt = """Speak as a native Sri Lankan Sinhala speaker with authentic pronunciation and natural intonation.
+Use pure Sinhala phonetics - not Tamil, Hindi, or any Indian accent.
+Pronounce each Sinhala syllable clearly with proper stress and rhythm patterns natural to Sinhala.
+Maintain a professional, polished customer service tone - courteous, confident, and articulate.
+Speak with the refinement of a well-educated Sinhala speaker providing professional assistance.
+Use a calm, steady, moderate volume with clear enunciation suitable for business communication.
+Avoid being too loud or aggressive - maintain a gentle but professional demeanor."""
                 
                 # === GEMINI 2.5 PRO TTS - PRIMARY (BEST Sinhala Quality!) ===
                 gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")

@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     # Gemini / Vertex TTS (premium voices)
     GEMINI_TTS_MODEL: Optional[str] = "gemini-2.5-pro-tts"
-    GEMINI_TTS_VOICE: Optional[str] = "Achernar"
+    GEMINI_TTS_VOICE: Optional[str] = "Kore"  # Warm, professional female voice
 
     # TTS Engine: 'gemini', 'google', 'azure', or 'gtts'
     COURIERBOT_TTS_ENGINE: Optional[str] = None
