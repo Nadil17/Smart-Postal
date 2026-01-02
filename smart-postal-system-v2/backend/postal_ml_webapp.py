@@ -1,11 +1,12 @@
 """
 Smart Postal Service ML System - Production Ready
-Web Application Module
+Web Application Module with Fuel Consumption Tracking
 
 Features:
 - Priority Classification (XGBoost)
 - Route Optimization (Q-Learning, 2-Opt, etc.)
 - Dynamic Rerouting System
+- Fuel Consumption Calculation
 """
 
 import pickle
@@ -214,7 +215,7 @@ class PriorityClassificationModel:
 
 class DynamicRouteOptimizer:
     """
-    Route Optimization with multiple algorithms
+    Route Optimization with multiple algorithms and fuel consumption tracking
     Supports Q-Learning, 2-Opt, Urgent Priority, and Nearest Neighbor
     """
 
@@ -229,6 +230,12 @@ class DynamicRouteOptimizer:
         
         self.avg_speed_kmh = 25
         self.service_time_minutes = 5
+        
+        # Fuel consumption parameters
+        self.base_fuel_consumption_per_km = 0.12  # liters per km (average postal vehicle)
+        self.idle_fuel_consumption_per_hour = 0.8  # liters per hour (idling during service)
+        self.fuel_tank_capacity = 50  # liters
+        self.initial_fuel_level = 45  # liters (90% capacity)
 
     def calculate_distance(self, point1: Dict, point2: Dict) -> float:
         """Calculate great circle distance in kilometers"""
@@ -250,6 +257,69 @@ class DynamicRouteOptimizer:
         base_time_hours = distance_km / self.avg_speed_kmh
         adjusted_time = base_time_hours * traffic_factor * weather_factor
         return adjusted_time
+
+    def calculate_fuel_consumption(self, distance_km: float, traffic_factor: float,
+                                   weather_factor: float, service_time_hours: float = 0) -> float:
+        """
+        Calculate fuel consumption for a route segment
+        
+        Args:
+            distance_km: Distance traveled
+            traffic_factor: Traffic impact (>1 = more fuel)
+            weather_factor: Weather impact (>1 = more fuel)
+            service_time_hours: Time spent at stops
+        
+        Returns:
+            Fuel consumed in liters
+        """
+        # Base fuel consumption
+        driving_fuel = distance_km * self.base_fuel_consumption_per_km
+        
+        # Traffic increases fuel consumption (stop-and-go)
+        traffic_multiplier = 1 + (traffic_factor - 1) * 0.3
+        
+        # Weather increases fuel consumption (AC, slower speeds)
+        weather_multiplier = 1 + (weather_factor - 1) * 0.2
+        
+        # Calculate driving fuel with conditions
+        total_driving_fuel = driving_fuel * traffic_multiplier * weather_multiplier
+        
+        # Add idling fuel during service stops
+        idling_fuel = service_time_hours * self.idle_fuel_consumption_per_hour
+        
+        return total_driving_fuel + idling_fuel
+
+    def calculate_route_fuel_metrics(self, route: List[int], points: List[Dict],
+                                     traffic: float, weather: float) -> Dict:
+        """Calculate comprehensive fuel metrics for a route"""
+        total_fuel = 0
+        total_distance = 0
+        
+        for i in range(len(route) - 1):
+            current_point = points[route[i]]
+            next_point = points[route[i + 1]]
+            
+            distance = self.calculate_distance(current_point, next_point)
+            total_distance += distance
+            
+            # Service time only for delivery stops (not depot)
+            service_time = self.service_time_minutes / 60 if i < len(route) - 2 else 0
+            
+            fuel = self.calculate_fuel_consumption(distance, traffic, weather, service_time)
+            total_fuel += fuel
+        
+        # Calculate fuel efficiency and remaining
+        fuel_efficiency = total_distance / total_fuel if total_fuel > 0 else 0
+        remaining_fuel = self.initial_fuel_level - total_fuel
+        fuel_percentage = (remaining_fuel / self.fuel_tank_capacity) * 100
+        
+        return {
+            'total_fuel_liters': round(total_fuel, 2),
+            'fuel_efficiency_km_per_liter': round(fuel_efficiency, 2),
+            'remaining_fuel_liters': round(remaining_fuel, 2),
+            'fuel_percentage': round(fuel_percentage, 1),
+            'needs_refuel': remaining_fuel < (self.fuel_tank_capacity * 0.2)  # Alert at 20%
+        }
 
     def _count_urgent_on_time(self, route: List[int], points: List[Dict],
                              traffic: float, weather: float) -> int:
@@ -305,13 +375,15 @@ class DynamicRouteOptimizer:
         route.append(0)
 
         urgent_on_time = self._count_urgent_on_time(route, points, traffic, weather)
+        fuel_metrics = self.calculate_route_fuel_metrics(route, points, traffic, weather)
 
         return {
             'route': route,
             'total_distance_km': round(total_distance, 2),
             'total_time_hours': round(total_time, 2),
             'urgent_on_time': urgent_on_time,
-            'method': 'Nearest Neighbor'
+            'method': 'Nearest Neighbor',
+            **fuel_metrics
         }
 
     def two_opt_improvement(self, scenario: Dict, initial_route: List[int]) -> Dict:
@@ -354,6 +426,7 @@ class DynamicRouteOptimizer:
         )
 
         urgent_on_time = self._count_urgent_on_time(route, points, traffic, weather)
+        fuel_metrics = self.calculate_route_fuel_metrics(route, points, traffic, weather)
 
         return {
             'route': route,
@@ -361,7 +434,8 @@ class DynamicRouteOptimizer:
             'total_time_hours': round(total_time, 2),
             'urgent_on_time': urgent_on_time,
             'iterations': iterations,
-            'method': '2-Opt Improved'
+            'method': '2-Opt Improved',
+            **fuel_metrics
         }
 
     def urgent_priority_route(self, scenario: Dict) -> Dict:
@@ -414,13 +488,15 @@ class DynamicRouteOptimizer:
         route.append(0)
 
         urgent_on_time = self._count_urgent_on_time(route, points, traffic, weather)
+        fuel_metrics = self.calculate_route_fuel_metrics(route, points, traffic, weather)
 
         return {
             'route': route,
             'total_distance_km': round(total_distance, 2),
             'total_time_hours': round(total_time, 2),
             'urgent_on_time': urgent_on_time,
-            'method': 'Urgent Priority'
+            'method': 'Urgent Priority',
+            **fuel_metrics
         }
 
     def q_learning_route(self, scenario: Dict, episodes: int = 500) -> Dict:
@@ -522,13 +598,15 @@ class DynamicRouteOptimizer:
         route.append(0)
 
         urgent_on_time = self._count_urgent_on_time(route, points, traffic, weather)
+        fuel_metrics = self.calculate_route_fuel_metrics(route, points, traffic, weather)
 
         return {
             'route': route,
             'total_distance_km': round(total_distance, 2),
             'total_time_hours': round(total_time, 2),
             'urgent_on_time': urgent_on_time,
-            'method': 'Q-Learning'
+            'method': 'Q-Learning',
+            **fuel_metrics
         }
 
     def optimize_route(self, scenario: Dict, methods: List[str] = None) -> Dict:
@@ -560,19 +638,29 @@ class DynamicRouteOptimizer:
         if 'q_learning' in methods:
             results['q_learning'] = self.q_learning_route(scenario, episodes=500)
 
-        # Find best method
+        # Find best method (considering distance, fuel, and urgent delivery success)
         best_method = min(results.keys(), 
-                         key=lambda m: results[m]['total_distance_km'])
+                         key=lambda m: (results[m]['total_distance_km'] * 0.6 + 
+                                       results[m]['total_fuel_liters'] * 0.4))
 
         # Calculate improvements
         baseline_distance = results.get('nearest_neighbor', {}).get('total_distance_km', 0)
+        baseline_fuel = results.get('nearest_neighbor', {}).get('total_fuel_liters', 0)
 
         for method, result in results.items():
             if baseline_distance > 0 and method != 'nearest_neighbor':
                 improvement = ((baseline_distance - result['total_distance_km']) / baseline_distance) * 100
                 result['improvement_pct'] = round(improvement, 2)
+                
+                if baseline_fuel > 0:
+                    fuel_savings = baseline_fuel - result['total_fuel_liters']
+                    fuel_improvement = (fuel_savings / baseline_fuel) * 100
+                    result['fuel_savings_liters'] = round(fuel_savings, 2)
+                    result['fuel_improvement_pct'] = round(fuel_improvement, 2)
             else:
                 result['improvement_pct'] = 0.0
+                result['fuel_savings_liters'] = 0.0
+                result['fuel_improvement_pct'] = 0.0
 
         return {
             'scenario': scenario,
@@ -668,6 +756,7 @@ class DynamicRerouter:
         distance_impact = new_result['total_distance_km'] - current_result['total_distance_km']
         time_impact = new_result['total_time_hours'] - current_result['total_time_hours']
         urgent_impact = new_result['urgent_on_time'] - current_result['urgent_on_time']
+        fuel_impact = new_result['total_fuel_liters'] - current_result['total_fuel_liters']
 
         impact = {
             'location_id': location_id,
@@ -675,32 +764,35 @@ class DynamicRerouter:
             'current_route': {
                 'distance_km': current_result['total_distance_km'],
                 'time_hours': current_result['total_time_hours'],
-                'urgent_success': current_result['urgent_on_time']
+                'urgent_success': current_result['urgent_on_time'],
+                'fuel_liters': current_result['total_fuel_liters']
             },
             'new_route': {
                 'distance_km': new_result['total_distance_km'],
                 'time_hours': new_result['total_time_hours'],
-                'urgent_success': new_result['urgent_on_time']
+                'urgent_success': new_result['urgent_on_time'],
+                'fuel_liters': new_result['total_fuel_liters']
             },
             'impact': {
                 'distance_change_km': round(distance_impact, 2),
                 'time_change_hours': round(time_impact, 2),
                 'urgent_impact': urgent_impact,
+                'fuel_change_liters': round(fuel_impact, 2),
                 'distance_change_pct': round((distance_impact / current_result['total_distance_km']) * 100, 2) if current_result['total_distance_km'] > 0 else 0
             },
-            'recommendation': self._get_recommendation(distance_impact, time_impact, urgent_impact)
+            'recommendation': self._get_recommendation(distance_impact, time_impact, urgent_impact, fuel_impact)
         }
 
         return impact
 
     def _get_recommendation(self, distance_impact: float, 
-                           time_impact: float, urgent_impact: int) -> str:
+                           time_impact: float, urgent_impact: int, fuel_impact: float) -> str:
         """Determine rerouting recommendation"""
         if urgent_impact < 0:
             return 'CRITICAL - Immediate reroute required'
-        if distance_impact > 5 or time_impact > 0.5:
+        if distance_impact > 5 or time_impact > 0.5 or fuel_impact > 2:
             return 'HIGH PRIORITY - Reroute recommended'
-        if distance_impact > 2 or time_impact > 0.2:
+        if distance_impact > 2 or time_impact > 0.2 or fuel_impact > 1:
             return 'MEDIUM - Reroute beneficial'
         if distance_impact > 0:
             return 'LOW - Reroute optional'
@@ -743,16 +835,19 @@ class DynamicRerouter:
             'original_route': {
                 'sequence': original_result['route'],
                 'distance_km': original_result['total_distance_km'],
-                'time_hours': original_result['total_time_hours']
+                'time_hours': original_result['total_time_hours'],
+                'fuel_liters': original_result['total_fuel_liters']
             },
             'new_route': {
                 'sequence': new_result['route'],
                 'distance_km': new_result['total_distance_km'],
-                'time_hours': new_result['total_time_hours']
+                'time_hours': new_result['total_time_hours'],
+                'fuel_liters': new_result['total_fuel_liters']
             },
             'improvement': {
                 'distance_saved_km': round(original_result['total_distance_km'] - new_result['total_distance_km'], 2),
-                'time_saved_hours': round(original_result['total_time_hours'] - new_result['total_time_hours'], 2)
+                'time_saved_hours': round(original_result['total_time_hours'] - new_result['total_time_hours'], 2),
+                'fuel_saved_liters': round(original_result['total_fuel_liters'] - new_result['total_fuel_liters'], 2)
             }
         }
 

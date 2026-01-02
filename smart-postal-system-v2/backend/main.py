@@ -6,6 +6,8 @@ import mysql.connector
 from datetime import datetime, timedelta
 import json
 import os
+import requests
+from functools import lru_cache
 
 # Import ML models
 from postal_ml_webapp import (
@@ -20,11 +22,15 @@ app = FastAPI(title="Postal Route Optimization API with ML")
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5500"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# API Keys - Store these in environment variables in production
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "AIzaSyB_996Uyid5qMajR-4PJY0EcpO6Prp_n4c")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "82307d7563dc58a7c929ee6441cfc1ea")
 
 # Initialize ML models
 priority_classifier = PriorityClassificationModel()
@@ -65,8 +71,8 @@ class RouteOptimizationRequest(BaseModel):
     zone_id: int
     deliveries: List[DeliveryInput]
     methods: Optional[List[str]] = None
-    traffic_level: Optional[str] = "moderate"
-    weather_condition: Optional[str] = "clear"
+    traffic_level: Optional[str] = None
+    weather_condition: Optional[str] = None
 
 class PriorityClassificationInput(BaseModel):
     mail_type: str
@@ -91,6 +97,117 @@ class ReroutingRequest(BaseModel):
     scenario: Dict
     relocations: List[Dict]
     method: Optional[str] = "q_learning"
+
+# Real-time Data Fetching Functions
+@lru_cache(maxsize=100)
+def get_weather_data(latitude: float, longitude: float) -> Dict:
+    """Fetch real-time weather data from OpenWeatherMap API"""
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/weather"
+        params = {
+            "lat": latitude,
+            "lon": longitude,
+            "appid": OPENWEATHER_API_KEY,
+            "units": "metric"
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Extract weather conditions
+        weather_main = data['weather'][0]['main'].lower()
+        rain_volume = data.get('rain', {}).get('1h', 0)
+        
+        # Determine weather condition
+        if 'rain' in weather_main or 'drizzle' in weather_main:
+            if rain_volume > 7.5:
+                condition = 'flooding'
+            elif rain_volume > 2.5:
+                condition = 'heavy_rain'
+            else:
+                condition = 'light_rain'
+        elif 'thunderstorm' in weather_main:
+            condition = 'flooding'
+        else:
+            condition = 'clear'
+        
+        return {
+            "condition": condition,
+            "temperature": data['main']['temp'],
+            "humidity": data['main']['humidity'],
+            "description": data['weather'][0]['description'],
+            "rain_volume": rain_volume
+        }
+    except Exception as e:
+        print(f"Weather API error: {e}")
+        # Return default weather
+        return {
+            "condition": "clear",
+            "temperature": 28,
+            "humidity": 70,
+            "description": "clear sky",
+            "rain_volume": 0
+        }
+
+def get_traffic_data(latitude: float, longitude: float) -> Dict:
+    """Fetch real-time traffic data from Google Maps API"""
+    try:
+        # Use Google Maps Distance Matrix API to estimate traffic
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+        
+        # Create a small radius to check local traffic
+        offset = 0.01  # approximately 1km
+        origin = f"{latitude},{longitude}"
+        destination = f"{latitude + offset},{longitude + offset}"
+        
+        params = {
+            "origins": origin,
+            "destinations": destination,
+            "departure_time": "now",
+            "traffic_model": "best_guess",
+            "key": GOOGLE_MAPS_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data['status'] == 'OK':
+            element = data['rows'][0]['elements'][0]
+            
+            if element['status'] == 'OK':
+                # Compare duration vs duration_in_traffic
+                normal_duration = element.get('duration', {}).get('value', 0)
+                traffic_duration = element.get('duration_in_traffic', {}).get('value', normal_duration)
+                
+                if traffic_duration > 0 and normal_duration > 0:
+                    traffic_ratio = traffic_duration / normal_duration
+                    
+                    # Determine traffic level based on ratio
+                    if traffic_ratio >= 1.5:
+                        level = 'severe'
+                    elif traffic_ratio >= 1.25:
+                        level = 'high'
+                    elif traffic_ratio >= 1.1:
+                        level = 'moderate'
+                    else:
+                        level = 'low'
+                    
+                    return {
+                        "level": level,
+                        "ratio": round(traffic_ratio, 2),
+                        "normal_duration": normal_duration,
+                        "traffic_duration": traffic_duration
+                    }
+        
+        # Default if API fails
+        return {"level": "moderate", "ratio": 1.0}
+        
+    except Exception as e:
+        print(f"Traffic API error: {e}")
+        # Return default traffic
+        return {"level": "moderate", "ratio": 1.0}
 
 # Helper Functions
 def get_traffic_factor(level: str) -> float:
@@ -127,6 +244,10 @@ def read_root():
             "priority_classifier": priority_classifier.is_trained,
             "route_optimizer": "loaded",
             "dynamic_rerouter": "loaded"
+        },
+        "apis_configured": {
+            "google_maps": bool(GOOGLE_MAPS_API_KEY and GOOGLE_MAPS_API_KEY != "AIzaSyB_996Uyid5qMajR-4PJY0EcpO6Prp_n4c"),
+            "openweather": bool(OPENWEATHER_API_KEY and OPENWEATHER_API_KEY != "82307d7563dc58a7c929ee6441cfc1ea")
         }
     }
 
@@ -147,6 +268,43 @@ def get_postal_zones():
         conn.close()
         
         return {"zones": zones}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conditions/{zone_id}")
+def get_zone_conditions(zone_id: int):
+    """Get real-time traffic and weather conditions for a zone"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("SELECT * FROM postal_zones WHERE zone_id = %s", (zone_id,))
+        zone = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if not zone:
+            raise HTTPException(status_code=404, detail="Zone not found")
+        
+        # Get center coordinates of the zone
+        boundary = json.loads(zone['boundary_coordinates'])
+        center_lat = sum(coord['lat'] for coord in boundary) / len(boundary)
+        center_lng = sum(coord['lng'] for coord in boundary) / len(boundary)
+        
+        # Fetch real-time data
+        weather_data = get_weather_data(center_lat, center_lng)
+        traffic_data = get_traffic_data(center_lat, center_lng)
+        
+        return {
+            "zone_id": zone_id,
+            "zone_name": zone['name'],
+            "weather": weather_data,
+            "traffic": traffic_data,
+            "timestamp": datetime.now().isoformat()
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -215,18 +373,36 @@ def train_priority_classifier(data: TrainingDataInput):
 
 @app.post("/api/ml/optimize-route")
 def optimize_route_ml(request: RouteOptimizationRequest):
-    """Optimize route using ML algorithms (Q-Learning, 2-Opt, etc.)"""
+    """Optimize route using ML algorithms with real-time conditions"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
+        
+        # Get zone information
+        cursor.execute("SELECT * FROM postal_zones WHERE zone_id = %s", (request.zone_id,))
+        zone = cursor.fetchone()
+        
+        if not zone:
+            raise HTTPException(status_code=404, detail="Zone not found")
+        
+        # Get real-time conditions
+        boundary = json.loads(zone['boundary_coordinates'])
+        center_lat = sum(coord['lat'] for coord in boundary) / len(boundary)
+        center_lng = sum(coord['lng'] for coord in boundary) / len(boundary)
+        
+        weather_data = get_weather_data(center_lat, center_lng)
+        traffic_data = get_traffic_data(center_lat, center_lng)
+        
+        traffic_level = request.traffic_level or traffic_data['level']
+        weather_condition = request.weather_condition or weather_data['condition']
         
         # Prepare delivery points for ML model
         delivery_points = [
             {
                 'id': 0,
                 'address': 'Postal Depot',
-                'latitude': 6.9271,
-                'longitude': 79.8612,
+                'latitude': center_lat,
+                'longitude': center_lng,
                 'parcels': 0,
                 'urgent': 0
             }
@@ -247,10 +423,10 @@ def optimize_route_ml(request: RouteOptimizationRequest):
         # Create scenario
         scenario = {
             'delivery_points': delivery_points,
-            'traffic_factor': get_traffic_factor(request.traffic_level),
-            'weather_factor': get_weather_factor(request.weather_condition),
-            'traffic_level': request.traffic_level,
-            'weather_condition': request.weather_condition
+            'traffic_factor': get_traffic_factor(traffic_level),
+            'weather_factor': get_weather_factor(weather_condition),
+            'traffic_level': traffic_level,
+            'weather_condition': weather_condition
         }
         
         # Optimize using multiple methods
@@ -284,7 +460,9 @@ def optimize_route_ml(request: RouteOptimizationRequest):
             json.dumps({
                 'urgent_on_time': best_result['urgent_on_time'],
                 'method': optimization_result['best_method'],
-                'improvement_pct': best_result.get('improvement_pct', 0)
+                'improvement_pct': best_result.get('improvement_pct', 0),
+                'traffic_level': traffic_level,
+                'weather_condition': weather_condition
             })
         ))
         
@@ -300,12 +478,18 @@ def optimize_route_ml(request: RouteOptimizationRequest):
             'results': formatted_results,
             'best_result': formatted_results[optimization_result['best_method']],
             'scenario': {
-                'traffic_level': request.traffic_level,
-                'weather_condition': request.weather_condition,
+                'traffic_level': traffic_level,
+                'weather_condition': weather_condition,
                 'traffic_factor': scenario['traffic_factor'],
                 'weather_factor': scenario['weather_factor']
+            },
+            'real_time_data': {
+                'weather': weather_data,
+                'traffic': traffic_data
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -351,60 +535,6 @@ def execute_rerouting(request: ReroutingRequest):
             method=request.method
         )
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/ml/compare-algorithms")
-def compare_algorithms(request: RouteOptimizationRequest):
-    """Compare all optimization algorithms side-by-side"""
-    try:
-        # Prepare delivery points
-        delivery_points = [{'id': 0, 'address': 'Depot', 'latitude': 6.9271, 
-                           'longitude': 79.8612, 'parcels': 0, 'urgent': 0}]
-        
-        for idx, delivery in enumerate(request.deliveries, start=1):
-            delivery_points.append({
-                'id': idx,
-                'address': delivery.address,
-                'latitude': delivery.latitude,
-                'longitude': delivery.longitude,
-                'parcels': delivery.parcels or 1,
-                'urgent': 1 if delivery.priority == 'urgent' else 0,
-                'time_window': 4.0 if delivery.priority == 'urgent' else 8.0
-            })
-        
-        scenario = {
-            'delivery_points': delivery_points,
-            'traffic_factor': get_traffic_factor(request.traffic_level),
-            'weather_factor': get_weather_factor(request.weather_condition),
-            'traffic_level': request.traffic_level,
-            'weather_condition': request.weather_condition
-        }
-        
-        # Run all methods
-        methods = ['nearest_neighbor', 'urgent_priority', '2opt', 'q_learning']
-        results = route_optimizer.optimize_route(scenario, methods)
-        
-        # Format comparison
-        comparison = []
-        for method in methods:
-            result = results['results'][method]
-            comparison.append({
-                'method': method,
-                'display_name': result['method'],
-                'distance_km': result['total_distance_km'],
-                'time_hours': result['total_time_hours'],
-                'urgent_success': result['urgent_on_time'],
-                'improvement_pct': result.get('improvement_pct', 0),
-                'route': format_route_for_map(result['route'], delivery_points),
-                'is_best': method == results['best_method']
-            })
-        
-        return {
-            'comparison': comparison,
-            'best_method': results['best_method'],
-            'scenario': scenario
-        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

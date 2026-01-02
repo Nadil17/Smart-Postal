@@ -8,15 +8,14 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .leaflet-container { height: 100%; width: 100%; }
+        .map-container { height: 100%; width: 100%; }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+        .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 </head>
 <body>
@@ -26,6 +25,28 @@
         const { useState, useEffect, useRef } = React;
 
         const API_BASE = 'http://localhost:8000/api';
+        const GOOGLE_MAPS_API_KEY = 'AIzaSyB_996Uyid5qMajR-4PJY0EcpO6Prp_n4c';
+
+        // Default center - Colombo, Sri Lanka
+        const DEFAULT_CENTER = { lat: 6.9271, lng: 79.8612 };
+
+        // Load Google Maps API
+        const loadGoogleMapsScript = () => {
+            return new Promise((resolve, reject) => {
+                if (window.google && window.google.maps) {
+                    resolve();
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=geometry`;
+                script.async = true;
+                script.defer = true;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        };
 
         const geocodeAddress = async (address) => {
             try {
@@ -46,16 +67,16 @@
                 }
                 
                 return {
-                    latitude: 6.9271 + (Math.random() - 0.5) * 0.1,
-                    longitude: 79.8612 + (Math.random() - 0.5) * 0.1,
+                    latitude: DEFAULT_CENTER.lat + (Math.random() - 0.5) * 0.1,
+                    longitude: DEFAULT_CENTER.lng + (Math.random() - 0.5) * 0.1,
                     success: false,
                     fallback: true
                 };
             } catch (error) {
                 console.error('Geocoding error:', error);
                 return {
-                    latitude: 6.9271 + (Math.random() - 0.5) * 0.1,
-                    longitude: 79.8612 + (Math.random() - 0.5) * 0.1,
+                    latitude: DEFAULT_CENTER.lat + (Math.random() - 0.5) * 0.1,
+                    longitude: DEFAULT_CENTER.lng + (Math.random() - 0.5) * 0.1,
                     success: false,
                     fallback: true
                 };
@@ -68,230 +89,263 @@
                           beforeDeliveries = null, afterDeliveries = null }) => {
             const mapRef = useRef(null);
             const mapInstanceRef = useRef(null);
+            const markersRef = useRef([]);
+            const polylinesRef = useRef([]);
 
             useEffect(() => {
-                if (!mapRef.current || mapInstanceRef.current) return;
+                loadGoogleMapsScript().then(() => {
+                    if (!mapRef.current || mapInstanceRef.current) return;
 
-                const map = L.map(mapRef.current).setView([center.lat, center.lng], zoom);
-                
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
-                }).addTo(map);
+                    const map = new google.maps.Map(mapRef.current, {
+                        center: { lat: center.lat, lng: center.lng },
+                        zoom: zoom,
+                        mapTypeControl: true,
+                        streetViewControl: true,
+                        fullscreenControl: true,
+                        zoomControl: true
+                    });
 
-                mapInstanceRef.current = map;
+                    mapInstanceRef.current = map;
+                }).catch(err => console.error('Failed to load Google Maps:', err));
 
                 return () => {
-                    if (mapInstanceRef.current) {
-                        mapInstanceRef.current.remove();
-                        mapInstanceRef.current = null;
-                    }
+                    markersRef.current.forEach(marker => marker.setMap(null));
+                    polylinesRef.current.forEach(polyline => polyline.setMap(null));
+                    markersRef.current = [];
+                    polylinesRef.current = [];
                 };
             }, []);
 
             useEffect(() => {
-                if (!mapInstanceRef.current || !deliveries) return;
+                if (!mapInstanceRef.current || !deliveries || !window.google) return;
 
                 const map = mapInstanceRef.current;
                 
-                map.eachLayer((layer) => {
-                    if (layer instanceof L.Marker || layer instanceof L.Polyline || layer instanceof L.Control) {
-                        if (layer instanceof L.Control) {
-                            map.removeControl(layer);
-                        } else {
-                            map.removeLayer(layer);
-                        }
-                    }
-                });
+                // Clear existing markers and polylines
+                markersRef.current.forEach(marker => marker.setMap(null));
+                polylinesRef.current.forEach(polyline => polyline.setMap(null));
+                markersRef.current = [];
+                polylinesRef.current = [];
 
-                // Relocation mode: show before/after with relocation indicator
+                // Relocation mode
                 if (relocationMode && relocationData && baselineRoute && optimalRoute) {
                     // Draw before route (blue dashed)
-                    const beforeCoords = baselineRoute.map(d => [d.latitude, d.longitude]);
-                    L.polyline(beforeCoords, {
-                        color: '#3b82f6',
-                        weight: 5,
-                        opacity: 0.6,
-                        dashArray: '15, 10'
-                    }).addTo(map).bindPopup('<strong style="color: #3b82f6;">📍 Before Relocation</strong>');
+                    const beforePath = baselineRoute.map(d => ({ lat: d.latitude, lng: d.longitude }));
+                    const beforePolyline = new google.maps.Polyline({
+                        path: beforePath,
+                        geodesic: true,
+                        strokeColor: '#3b82f6',
+                        strokeOpacity: 0.6,
+                        strokeWeight: 5,
+                        icons: [{
+                            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+                            offset: '0',
+                            repeat: '20px'
+                        }]
+                    });
+                    beforePolyline.setMap(map);
+                    polylinesRef.current.push(beforePolyline);
 
                     // Draw after route (green solid)
-                    const afterCoords = optimalRoute.map(d => [d.latitude, d.longitude]);
-                    L.polyline(afterCoords, {
-                        color: '#10b981',
-                        weight: 5,
-                        opacity: 0.9
-                    }).addTo(map).bindPopup('<strong style="color: #10b981;">📍 After Relocation</strong>');
+                    const afterPath = optimalRoute.map(d => ({ lat: d.latitude, lng: d.longitude }));
+                    const afterPolyline = new google.maps.Polyline({
+                        path: afterPath,
+                        geodesic: true,
+                        strokeColor: '#10b981',
+                        strokeOpacity: 0.9,
+                        strokeWeight: 5
+                    });
+                    afterPolyline.setMap(map);
+                    polylinesRef.current.push(afterPolyline);
 
                     // Mark old location
-                    L.marker([relocationData.old_latitude, relocationData.old_longitude], {
-                        icon: L.divIcon({
-                            className: 'old-location-marker',
-                            html: '<div style="background: #9ca3af; color: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 3px solid white; box-shadow: 0 3px 8px rgba(0,0,0,0.4); font-size: 18px;">📍</div>',
-                            iconSize: [40, 40]
-                        })
-                    }).bindPopup(`
-                        <div style="min-width: 200px;">
-                            <strong style="font-size: 14px; color: #9ca3af;">OLD LOCATION</strong><br>
-                            <div style="margin-top: 8px; font-size: 12px;">
-                                <strong>Address:</strong><br>${relocationData.address.substring(0, 50)}...<br>
-                                <strong>Coordinates:</strong><br>
-                                ${relocationData.old_latitude.toFixed(4)}, ${relocationData.old_longitude.toFixed(4)}
+                    const oldMarker = new google.maps.Marker({
+                        position: { lat: relocationData.old_latitude, lng: relocationData.old_longitude },
+                        map: map,
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 20,
+                            fillColor: '#9ca3af',
+                            fillOpacity: 1,
+                            strokeColor: '#ffffff',
+                            strokeWeight: 3
+                        },
+                        title: 'Old Location'
+                    });
+
+                    const oldInfoWindow = new google.maps.InfoWindow({
+                        content: `
+                            <div style="min-width: 200px; padding: 10px;">
+                                <strong style="font-size: 14px; color: #9ca3af;">📍 OLD LOCATION</strong><br>
+                                <div style="margin-top: 8px; font-size: 12px;">
+                                    <strong>Address:</strong><br>${relocationData.address.substring(0, 50)}...<br>
+                                    <strong>Coordinates:</strong><br>
+                                    ${relocationData.old_latitude.toFixed(4)}, ${relocationData.old_longitude.toFixed(4)}
+                                </div>
                             </div>
-                        </div>
-                    `).addTo(map);
+                        `
+                    });
+
+                    oldMarker.addListener('click', () => oldInfoWindow.open(map, oldMarker));
+                    markersRef.current.push(oldMarker);
 
                     // Mark new location
-                    L.marker([relocationData.new_latitude, relocationData.new_longitude], {
-                        icon: L.divIcon({
-                            className: 'new-location-marker',
-                            html: '<div style="background: linear-gradient(135deg, #f59e0b, #ef4444); color: white; border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 4px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.6); font-size: 22px;">📍</div>',
-                            iconSize: [48, 48]
-                        })
-                    }).bindPopup(`
-                        <div style="min-width: 220px;">
-                            <strong style="font-size: 16px; color: #f59e0b;">📍 NEW LOCATION</strong><br>
-                            <div style="margin-top: 8px;">
-                                <strong>New Address:</strong><br>${relocationData.new_address || 'Custom Coordinates'}<br>
-                                <strong>Coordinates:</strong><br>
-                                ${relocationData.new_latitude.toFixed(4)}, ${relocationData.new_longitude.toFixed(4)}<br>
-                                <strong style="color: #ef4444;">Distance Moved:</strong> ${relocationData.distance_change_km} km
-                            </div>
-                        </div>
-                    `).addTo(map);
+                    const newMarker = new google.maps.Marker({
+                        position: { lat: relocationData.new_latitude, lng: relocationData.new_longitude },
+                        map: map,
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 24,
+                            fillColor: '#f59e0b',
+                            fillOpacity: 1,
+                            strokeColor: '#ffffff',
+                            strokeWeight: 4
+                        },
+                        title: 'New Location',
+                        animation: google.maps.Animation.BOUNCE
+                    });
 
-                    // Draw line showing relocation
-                    L.polyline([
-                        [relocationData.old_latitude, relocationData.old_longitude],
-                        [relocationData.new_latitude, relocationData.new_longitude]
-                    ], {
-                        color: '#f59e0b',
-                        weight: 4,
-                        opacity: 0.8,
-                        dashArray: '10, 10'
-                    }).addTo(map).bindPopup('<strong style="color: #f59e0b;">🔄 Relocation Path</strong>');
+                    const newInfoWindow = new google.maps.InfoWindow({
+                        content: `
+                            <div style="min-width: 220px; padding: 10px;">
+                                <strong style="font-size: 16px; color: #f59e0b;">📍 NEW LOCATION</strong><br>
+                                <div style="margin-top: 8px;">
+                                    <strong>New Address:</strong><br>${relocationData.new_address || 'Custom Coordinates'}<br>
+                                    <strong>Coordinates:</strong><br>
+                                    ${relocationData.new_latitude.toFixed(4)}, ${relocationData.new_longitude.toFixed(4)}<br>
+                                    <strong style="color: #ef4444;">Distance Moved:</strong> ${relocationData.distance_change_km} km
+                                </div>
+                            </div>
+                        `
+                    });
 
-                    // Add legend
-                    const legend = L.control({ position: 'topright' });
-                    legend.onAdd = function() {
-                        const div = L.DomUtil.create('div', 'bg-white p-4 rounded-lg shadow-xl border-2');
-                        div.innerHTML = `
-                            <div style="font-weight: bold; margin-bottom: 12px; font-size: 16px; color: #1f2937;">Relocation Impact</div>
-                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                <div style="width: 40px; height: 4px; background: #3b82f6; border: 2px dashed #3b82f6; margin-right: 10px;"></div>
-                                <span style="font-size: 13px;">Before</span>
-                            </div>
-                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                <div style="width: 40px; height: 4px; background: #10b981; margin-right: 10px;"></div>
-                                <span style="font-size: 13px;">After</span>
-                            </div>
-                            <div style="display: flex; align-items: center;">
-                                <div style="width: 40px; height: 4px; background: #f59e0b; border: 2px dashed #f59e0b; margin-right: 10px;"></div>
-                                <span style="font-size: 13px;">Relocation</span>
-                            </div>
-                        `;
-                        return div;
-                    };
-                    legend.addTo(map);
+                    newMarker.addListener('click', () => newInfoWindow.open(map, newMarker));
+                    markersRef.current.push(newMarker);
 
-                    // Add all other delivery markers (excluding the relocated one)
+                    // Draw relocation path
+                    const relocationPath = new google.maps.Polyline({
+                        path: [
+                            { lat: relocationData.old_latitude, lng: relocationData.old_longitude },
+                            { lat: relocationData.new_latitude, lng: relocationData.new_longitude }
+                        ],
+                        geodesic: true,
+                        strokeColor: '#f59e0b',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 4,
+                        icons: [{
+                            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+                            offset: '0',
+                            repeat: '20px'
+                        }]
+                    });
+                    relocationPath.setMap(map);
+                    polylinesRef.current.push(relocationPath);
+
+                    // Add other delivery markers
                     const displayDeliveries = afterDeliveries || deliveries;
                     displayDeliveries.forEach((delivery, index) => {
-                        if (delivery.id === relocationData.location_id) return; // Skip relocated delivery
+                        if (delivery.id === relocationData.location_id) return;
                         
                         const isUrgent = delivery.priority === 'urgent';
                         
-                        const icon = L.divIcon({
-                            className: 'custom-marker',
-                            html: `<div style="background-color: ${isUrgent ? '#ef4444' : '#3b82f6'}; 
-                                    color: white; border-radius: 50%; width: 28px; height: 28px; 
-                                    display: flex; align-items: center; justify-content: center;
-                                    font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 12px;">
-                                    •
-                                  </div>`,
-                            iconSize: [28, 28]
+                        const marker = new google.maps.Marker({
+                            position: { lat: delivery.latitude, lng: delivery.longitude },
+                            map: map,
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 14,
+                                fillColor: isUrgent ? '#ef4444' : '#3b82f6',
+                                fillOpacity: 1,
+                                strokeColor: '#ffffff',
+                                strokeWeight: 2
+                            },
+                            title: delivery.address
                         });
 
-                        L.marker([delivery.latitude, delivery.longitude], { icon })
-                            .bindPopup(`
-                                <div style="min-width: 200px;">
+                        const infoWindow = new google.maps.InfoWindow({
+                            content: `
+                                <div style="min-width: 200px; padding: 10px;">
                                     <strong style="font-size: 14px;">${delivery.address}</strong><br>
                                     <div style="margin-top: 8px;">
                                         <strong>Priority:</strong> <span style="color: ${isUrgent ? '#ef4444' : '#3b82f6'}; font-weight: bold;">${(delivery.priority || 'regular').toUpperCase()}</span>
                                     </div>
                                 </div>
-                            `)
-                            .addTo(map);
+                            `
+                        });
+
+                        marker.addListener('click', () => infoWindow.open(map, marker));
+                        markersRef.current.push(marker);
                     });
 
                     // Fit bounds
-                    const allCoords = [
-                        ...displayDeliveries.map(d => [d.latitude, d.longitude]),
-                        [relocationData.old_latitude, relocationData.old_longitude],
-                        [relocationData.new_latitude, relocationData.new_longitude]
-                    ];
-                    const bounds = L.latLngBounds(allCoords);
-                    map.fitBounds(bounds, { padding: [50, 50] });
+                    const bounds = new google.maps.LatLngBounds();
+                    displayDeliveries.forEach(d => bounds.extend({ lat: d.latitude, lng: d.longitude }));
+                    bounds.extend({ lat: relocationData.old_latitude, lng: relocationData.old_longitude });
+                    bounds.extend({ lat: relocationData.new_latitude, lng: relocationData.new_longitude });
+                    map.fitBounds(bounds);
 
-                    return; // Exit early for relocation mode
+                    return;
                 }
 
-                // Comparison mode: show baseline vs optimal
+                // Comparison mode
                 if (comparisonMode && baselineRoute && optimalRoute) {
                     // Draw baseline route (blue dashed)
-                    const baselineCoords = baselineRoute.map(d => [d.latitude, d.longitude]);
-                    L.polyline(baselineCoords, {
-                        color: '#3b82f6',
-                        weight: 5,
-                        opacity: 0.6,
-                        dashArray: '15, 10'
-                    }).addTo(map).bindPopup('<strong style="color: #3b82f6; font-size: 14px;">📍 Baseline Route (Nearest Neighbor)</strong>');
+                    const baselinePath = baselineRoute.map(d => ({ lat: d.latitude, lng: d.longitude }));
+                    const baselinePolyline = new google.maps.Polyline({
+                        path: baselinePath,
+                        geodesic: true,
+                        strokeColor: '#3b82f6',
+                        strokeOpacity: 0.6,
+                        strokeWeight: 5,
+                        icons: [{
+                            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+                            offset: '0',
+                            repeat: '20px'
+                        }]
+                    });
+                    baselinePolyline.setMap(map);
+                    polylinesRef.current.push(baselinePolyline);
 
                     // Draw optimal route (green solid)
-                    const optimalCoords = optimalRoute.map(d => [d.latitude, d.longitude]);
-                    L.polyline(optimalCoords, {
-                        color: '#10b981',
-                        weight: 5,
-                        opacity: 0.9
-                    }).addTo(map).bindPopup('<strong style="color: #10b981; font-size: 14px;">🎯 Optimal Route (ML Optimized)</strong>');
-
-                    // Add legend
-                    const legend = L.control({ position: 'topright' });
-                    legend.onAdd = function() {
-                        const div = L.DomUtil.create('div', 'bg-white p-4 rounded-lg shadow-xl border-2');
-                        div.innerHTML = `
-                            <div style="font-weight: bold; margin-bottom: 12px; font-size: 16px; color: #1f2937;">Route Comparison</div>
-                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                <div style="width: 40px; height: 4px; background: #3b82f6; border: 2px dashed #3b82f6; margin-right: 10px;"></div>
-                                <span style="font-size: 13px;">Baseline (NN)</span>
-                            </div>
-                            <div style="display: flex; align-items: center;">
-                                <div style="width: 40px; height: 4px; background: #10b981; margin-right: 10px;"></div>
-                                <span style="font-size: 13px;">Optimal (ML)</span>
-                            </div>
-                        `;
-                        return div;
-                    };
-                    legend.addTo(map);
+                    const optimalPath = optimalRoute.map(d => ({ lat: d.latitude, lng: d.longitude }));
+                    const optimalPolyline = new google.maps.Polyline({
+                        path: optimalPath,
+                        geodesic: true,
+                        strokeColor: '#10b981',
+                        strokeOpacity: 0.9,
+                        strokeWeight: 5
+                    });
+                    optimalPolyline.setMap(map);
+                    polylinesRef.current.push(optimalPolyline);
                 }
 
                 // Standard route display
                 deliveries.forEach((delivery, index) => {
                     const isUrgent = delivery.priority === 'urgent';
                     
-                    const icon = L.divIcon({
-                        className: 'custom-marker',
-                        html: `<div style="background-color: ${isUrgent ? '#ef4444' : '#3b82f6'}; 
-                                color: white; border-radius: 50%; width: 32px; height: 32px; 
-                                display: flex; align-items: center; justify-content: center;
-                                font-weight: bold; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);">
-                                ${showLabels ? (index + 1) : '•'}
-                              </div>`,
-                        iconSize: [32, 32]
+                    const marker = new google.maps.Marker({
+                        position: { lat: delivery.latitude, lng: delivery.longitude },
+                        map: map,
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 16,
+                            fillColor: isUrgent ? '#ef4444' : '#3b82f6',
+                            fillOpacity: 1,
+                            strokeColor: '#ffffff',
+                            strokeWeight: 3
+                        },
+                        label: showLabels ? {
+                            text: `${index + 1}`,
+                            color: '#ffffff',
+                            fontSize: '12px',
+                            fontWeight: 'bold'
+                        } : null,
+                        title: delivery.address
                     });
 
-                    L.marker([delivery.latitude, delivery.longitude], { icon })
-                        .bindPopup(`
-                            <div style="min-width: 220px;">
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `
+                            <div style="min-width: 220px; padding: 10px;">
                                 <strong style="font-size: 15px;">${delivery.address}</strong><br>
                                 <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
                                     <div style="margin-bottom: 4px;"><strong>Mail Type:</strong> ${delivery.mail_type || 'N/A'}</div>
@@ -299,43 +353,66 @@
                                     ${showLabels ? `<div><strong>Sequence:</strong> #${index + 1}</div>` : ''}
                                 </div>
                             </div>
-                        `)
-                        .addTo(map);
+                        `
+                    });
+
+                    marker.addListener('click', () => infoWindow.open(map, marker));
+                    markersRef.current.push(marker);
                 });
 
                 // Draw single route if not in comparison mode
                 if (showRoute && route && route.length > 0 && !comparisonMode) {
-                    const routeCoords = route.map(d => [d.latitude, d.longitude]);
-                    
-                    L.polyline(routeCoords, {
-                        color: '#10b981',
-                        weight: 5,
-                        opacity: 0.8
-                    }).addTo(map);
+                    const routePath = route.map(d => ({ lat: d.latitude, lng: d.longitude }));
+                    const routePolyline = new google.maps.Polyline({
+                        path: routePath,
+                        geodesic: true,
+                        strokeColor: '#10b981',
+                        strokeOpacity: 0.8,
+                        strokeWeight: 5
+                    });
+                    routePolyline.setMap(map);
+                    polylinesRef.current.push(routePolyline);
                 }
 
                 // Add depot marker
-                L.marker([center.lat, center.lng], {
-                    icon: L.divIcon({
-                        className: 'depot-marker',
-                        html: '<div style="background-color: #10b981; color: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.5); font-size: 20px;">🏢</div>',
-                        iconSize: [40, 40]
-                    })
-                }).bindPopup('<strong>Postal Depot (Start/End)</strong>').addTo(map);
+                const depotMarker = new google.maps.Marker({
+                    position: { lat: center.lat, lng: center.lng },
+                    map: map,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 20,
+                        fillColor: '#10b981',
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 3
+                    },
+                    label: {
+                        text: '🏢',
+                        fontSize: '20px'
+                    },
+                    title: 'Postal Depot'
+                });
 
+                const depotInfoWindow = new google.maps.InfoWindow({
+                    content: '<strong>Postal Depot (Start/End)</strong>'
+                });
+
+                depotMarker.addListener('click', () => depotInfoWindow.open(map, depotMarker));
+                markersRef.current.push(depotMarker);
+
+                // Fit bounds to show all markers
                 if (deliveries.length > 0) {
-                    const allCoords = deliveries.map(d => [d.latitude, d.longitude]);
-                    const bounds = L.latLngBounds(allCoords);
-                    map.fitBounds(bounds, { padding: [50, 50] });
+                    const bounds = new google.maps.LatLngBounds();
+                    deliveries.forEach(d => bounds.extend({ lat: d.latitude, lng: d.longitude }));
+                    bounds.extend({ lat: center.lat, lng: center.lng });
+                    map.fitBounds(bounds);
                 }
             }, [deliveries, route, showRoute, comparisonMode, baselineRoute, optimalRoute, showLabels, relocationMode, relocationData, afterDeliveries]);
 
-            return <div ref={mapRef} style={{ height: '100%', width: '100%' }} />;
+            return <div ref={mapRef} className="map-container" />;
         };
 
         const App = () => {
-            const [zones, setZones] = useState([]);
-            const [selectedZone, setSelectedZone] = useState(null);
             const [deliveries, setDeliveries] = useState([]);
             const [allRoutes, setAllRoutes] = useState(null);
             const [loading, setLoading] = useState(false);
@@ -344,17 +421,12 @@
             const fileInputRef = useRef(null);
 
             // View state
-            const [currentView, setCurrentView] = useState('upload'); // 'upload', 'mailList', 'routes', 'comparison', 'relocation'
+            const [currentView, setCurrentView] = useState('upload');
 
-            // Traffic and Weather state
-            const [trafficLevel, setTrafficLevel] = useState('moderate');
-            const [weatherCondition, setWeatherCondition] = useState('clear');
+            // Real-time conditions
+            const [currentConditions, setCurrentConditions] = useState(null);
+            const [conditionsLoading, setConditionsLoading] = useState(false);
             
-            // Comparison state
-            const [comparisonRoutes, setComparisonRoutes] = useState(null);
-            const [compareTraffic, setCompareTraffic] = useState('high');
-            const [compareWeather, setCompareWeather] = useState('heavy_rain');
-
             // Relocation state
             const [selectedDeliveryId, setSelectedDeliveryId] = useState(null);
             const [newAddress, setNewAddress] = useState('');
@@ -363,43 +435,48 @@
             const [relocationData, setRelocationData] = useState(null);
             const [relocationRoutes, setRelocationRoutes] = useState(null);
 
+            // Calculate center from deliveries
+            const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
+
             useEffect(() => {
-                fetchZones();
+                loadGoogleMapsScript();
             }, []);
 
-            const fetchZones = async () => {
-                try {
-                    const response = await fetch(`${API_BASE}/postal-zones`);
-                    const data = await response.json();
-                    setZones(data.zones);
-                } catch (error) {
-                    console.error('Error fetching zones:', error);
-                    setError('Failed to load postal zones');
+            useEffect(() => {
+                if (deliveries.length > 0) {
+                    const avgLat = deliveries.reduce((sum, d) => sum + d.latitude, 0) / deliveries.length;
+                    const avgLng = deliveries.reduce((sum, d) => sum + d.longitude, 0) / deliveries.length;
+                    setMapCenter({ lat: avgLat, lng: avgLng });
                 }
-            };
+            }, [deliveries]);
 
-            const handleZoneSelect = async (zoneId) => {
-                setSelectedZone(zoneId);
-                setAllRoutes(null);
-                setComparisonRoutes(null);
-                setRelocationRoutes(null);
-                setRelocationData(null);
-                setSelectedDeliveryId(null);
-                setNewAddress('');
-                setNewLatitude('');
-                setNewLongitude('');
-                setError(null);
-                setCurrentView('upload');
+            const fetchRealTimeConditions = async () => {
+                if (deliveries.length === 0) return;
                 
-                if (zoneId) {
-                    try {
-                        const response = await fetch(`${API_BASE}/deliveries/${zoneId}`);
-                        const data = await response.json();
-                        setDeliveries(data.deliveries.map((d, idx) => ({...d, id: d.delivery_id || idx + 1})));
-                    } catch (error) {
-                        console.error('Error fetching deliveries:', error);
-                        setError('Failed to load deliveries');
-                    }
+                setConditionsLoading(true);
+                try {
+                    const avgLat = deliveries.reduce((sum, d) => sum + d.latitude, 0) / deliveries.length;
+                    const avgLng = deliveries.reduce((sum, d) => sum + d.longitude, 0) / deliveries.length;
+
+                    // Mock weather and traffic data
+                    setCurrentConditions({
+                        weather: {
+                            condition: 'clear',
+                            temperature: 28,
+                            humidity: 70,
+                            description: 'clear sky',
+                            rain_volume: 0
+                        },
+                        traffic: {
+                            level: 'moderate',
+                            ratio: 1.0
+                        },
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Error fetching conditions:', error);
+                } finally {
+                    setConditionsLoading(false);
                 }
             };
 
@@ -488,6 +565,9 @@
                             setError(null);
                             setCurrentView('mailList');
                             
+                            // Fetch conditions after upload
+                            setTimeout(() => fetchRealTimeConditions(), 500);
+                            
                             alert(`Successfully processed ${processedDeliveries.length} deliveries!`);
                         } catch (error) {
                             console.error('Error processing CSV:', error);
@@ -507,7 +587,7 @@
             };
 
             const optimizeRoutes = async () => {
-                if (!selectedZone || deliveries.length === 0) return;
+                if (deliveries.length === 0) return;
 
                 setLoading(true);
                 setError(null);
@@ -517,7 +597,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            zone_id: selectedZone,
+                            zone_id: 1,
                             deliveries: deliveries.map(d => ({
                                 address: d.address,
                                 latitude: d.latitude,
@@ -527,9 +607,7 @@
                                 parcels: 1,
                                 urgent: d.priority === 'urgent' ? 1 : 0
                             })),
-                            methods: ['nearest_neighbor', 'urgent_priority', '2opt', 'q_learning'],
-                            traffic_level: trafficLevel,
-                            weather_condition: weatherCondition
+                            methods: ['nearest_neighbor', 'urgent_priority', '2opt', 'q_learning']
                         })
                     });
                     
@@ -539,52 +617,20 @@
                     
                     const data = await response.json();
                     setAllRoutes(data);
+                    
+                    // Update conditions if returned
+                    if (data.real_time_data) {
+                        setCurrentConditions(prev => ({
+                            ...prev,
+                            weather: data.real_time_data.weather,
+                            traffic: data.real_time_data.traffic
+                        }));
+                    }
+                    
                     setCurrentView('routes');
                 } catch (error) {
                     console.error('Error optimizing route:', error);
                     setError('Error optimizing route: ' + error.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            const compareConditions = async () => {
-                if (!allRoutes) return;
-
-                setLoading(true);
-                setError(null);
-
-                try {
-                    const response = await fetch(`${API_BASE}/ml/optimize-route`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            zone_id: selectedZone,
-                            deliveries: deliveries.map(d => ({
-                                address: d.address,
-                                latitude: d.latitude,
-                                longitude: d.longitude,
-                                mail_type: d.mail_type,
-                                priority: d.priority,
-                                parcels: 1,
-                                urgent: d.priority === 'urgent' ? 1 : 0
-                            })),
-                            methods: ['nearest_neighbor', 'urgent_priority', '2opt', 'q_learning'],
-                            traffic_level: compareTraffic,
-                            weather_condition: compareWeather
-                        })
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    const data = await response.json();
-                    setComparisonRoutes(data);
-                    setCurrentView('comparison');
-                } catch (error) {
-                    console.error('Error comparing conditions:', error);
-                    setError('Error comparing conditions: ' + error.message);
                 } finally {
                     setLoading(false);
                 }
@@ -630,7 +676,6 @@
                         throw new Error('Selected delivery not found');
                     }
 
-                    // Calculate distance change
                     const R = 6371;
                     const oldLat = selectedDelivery.latitude;
                     const oldLon = selectedDelivery.longitude;
@@ -645,19 +690,17 @@
                     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
                     const distanceChange = (R * c).toFixed(2);
 
-                    // Create updated deliveries with new location
                     const updatedDeliveries = deliveries.map(d => 
                         d.id === selectedDeliveryId 
                             ? { ...d, latitude: newLat, longitude: newLon }
                             : d
                     );
 
-                    // Optimize with new location
                     const response = await fetch(`${API_BASE}/ml/optimize-route`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            zone_id: selectedZone,
+                            zone_id: 1,
                             deliveries: updatedDeliveries.map(d => ({
                                 address: d.address,
                                 latitude: d.latitude,
@@ -667,9 +710,7 @@
                                 parcels: 1,
                                 urgent: d.priority === 'urgent' ? 1 : 0
                             })),
-                            methods: ['nearest_neighbor', 'urgent_priority', '2opt', 'q_learning'],
-                            traffic_level: trafficLevel,
-                            weather_condition: weatherCondition
+                            methods: ['nearest_neighbor', 'urgent_priority', '2opt', 'q_learning']
                         })
                     });
 
@@ -705,12 +746,6 @@
                 }
             };
 
-            const selectedZoneData = zones.find(z => z.zone_id === selectedZone);
-            const center = selectedZoneData ? 
-                { lat: selectedZoneData.boundary_coordinates[0].lat, 
-                  lng: selectedZoneData.boundary_coordinates[0].lng } :
-                { lat: 6.9271, lng: 79.8612 };
-
             const urgentCount = deliveries.filter(d => d.priority === 'urgent').length;
             const regularCount = deliveries.filter(d => d.priority === 'regular').length;
 
@@ -727,8 +762,26 @@
             return (
                 <div className="h-screen flex flex-col">
                     <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 shadow-lg">
-                        <h1 className="text-2xl font-bold">📮 Postal Route Optimization System</h1>
-                        
+                        <div className="flex justify-between items-center">
+                            <h1 className="text-2xl font-bold">🗺️ Postal Route Optimization System</h1>
+                            {currentConditions && deliveries.length > 0 && (
+                                <div className="flex gap-4 text-sm">
+                                    <div className="bg-white/20 px-4 py-2 rounded-lg">
+                                        <span className="font-semibold">Traffic:</span> {getTrafficIcon(currentConditions.traffic.level)} {currentConditions.traffic.level}
+                                    </div>
+                                    <div className="bg-white/20 px-4 py-2 rounded-lg">
+                                        <span className="font-semibold">Weather:</span> {getWeatherIcon(currentConditions.weather.condition)} {currentConditions.weather.description}
+                                    </div>
+                                    <button
+                                        onClick={fetchRealTimeConditions}
+                                        disabled={conditionsLoading}
+                                        className="bg-white/20 px-4 py-2 rounded-lg hover:bg-white/30 transition-all disabled:opacity-50"
+                                    >
+                                        {conditionsLoading ? '⏳' : '🔄'} Refresh
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="flex-1 flex overflow-hidden">
@@ -751,27 +804,8 @@
                                     </div>
                                 )}
 
-                                {/* Zone Selection */}
-                                <div className="bg-white p-4 rounded-lg shadow">
-                                    <label className="block text-sm font-bold mb-2 text-gray-700">
-                                        🗺️ Select Postal Zone
-                                    </label>
-                                    <select 
-                                        className="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
-                                        value={selectedZone || ''}
-                                        onChange={(e) => handleZoneSelect(Number(e.target.value))}
-                                    >
-                                        <option value="">Choose a zone...</option>
-                                        {zones.map(zone => (
-                                            <option key={zone.zone_id} value={zone.zone_id}>
-                                                {zone.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-
                                 {/* CSV Upload */}
-                                {selectedZone && currentView === 'upload' && (
+                                {currentView === 'upload' && (
                                     <div className="bg-white p-4 rounded-lg shadow">
                                         <label className="block text-sm font-bold mb-2 text-gray-700">
                                             📄 Upload Mail CSV
@@ -791,6 +825,57 @@
                                         >
                                             {loading ? '⏳ Processing...' : '📤 Upload CSV File'}
                                         </button>
+                                        <div className="mt-3 text-xs text-gray-500 bg-gray-100 p-3 rounded">
+                                            <p className="font-semibold mb-2">Required CSV columns:</p>
+                                            <ul className="list-disc list-inside space-y-1">
+                                                <li>address</li>
+                                                <li>mail_type</li>
+                                                <li>latitude (optional)</li>
+                                                <li>longitude (optional)</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Real-time Conditions Display */}
+                                {currentConditions && deliveries.length > 0 && (
+                                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg shadow border-2 border-blue-200">
+                                        <h3 className="font-bold mb-3 text-gray-800 flex items-center">
+                                            <span className="mr-2">🌍</span> 
+                                            Real-Time Conditions
+                                        </h3>
+                                        
+                                        <div className="space-y-3">
+                                            <div className="bg-white p-3 rounded-lg">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="font-semibold text-gray-700">Traffic Status</span>
+                                                    <span className="text-2xl">{getTrafficIcon(currentConditions.traffic.level)}</span>
+                                                </div>
+                                                <div className="text-sm text-gray-600">
+                                                    <div>Level: <span className="font-bold capitalize">{currentConditions.traffic.level}</span></div>
+                                                    {currentConditions.traffic.ratio && (
+                                                        <div>Delay Factor: <span className="font-bold">{currentConditions.traffic.ratio}x</span></div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-white p-3 rounded-lg">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <span className="font-semibold text-gray-700">Weather Conditions</span>
+                                                    <span className="text-2xl">{getWeatherIcon(currentConditions.weather.condition)}</span>
+                                                </div>
+                                                <div className="text-sm text-gray-600">
+                                                    <div>Condition: <span className="font-bold capitalize">{currentConditions.weather.description}</span></div>
+                                                    <div>Temperature: <span className="font-bold">{currentConditions.weather.temperature}°C</span></div>
+                                                    <div>Humidity: <span className="font-bold">{currentConditions.weather.humidity}%</span></div>
+                                                    {currentConditions.weather.rain_volume > 0 && (
+                                                        <div>Rain: <span className="font-bold">{currentConditions.weather.rain_volume}mm/h</span></div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            
+                                        </div>
                                     </div>
                                 )}
 
@@ -819,58 +904,13 @@
                                 )}
 
                                 {/* View Mail List Button */}
-                                {deliveries.length > 0 && currentView !== 'mailList' && (
+                                {deliveries.length > 0 && currentView !== 'mailList' && currentView !== 'upload' && (
                                     <button
                                         onClick={() => setCurrentView('mailList')}
                                         className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-indigo-600 hover:to-purple-700 transition-all shadow"
                                     >
                                         📋 View All Mail Classification
                                     </button>
-                                )}
-
-                                {/* Traffic and Weather Controls */}
-                                {deliveries.length > 0 && currentView !== 'upload' && (
-                                    <div className="bg-white p-4 rounded-lg shadow">
-                                        <h3 className="font-bold mb-3 text-gray-700">
-                                            🌍 Current Conditions
-                                        </h3>
-                                        
-                                        <div className="space-y-3">
-                                            <div>
-                                                <label className="block text-sm font-semibold mb-2">
-                                                    {getTrafficIcon(trafficLevel)} Traffic Level
-                                                </label>
-                                                <select
-                                                    value={trafficLevel}
-                                                    onChange={(e) => setTrafficLevel(e.target.value)}
-                                                    className="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
-                                                    disabled={currentView === 'routes' || currentView === 'comparison'}
-                                                >
-                                                    <option value="low">🟢 Low</option>
-                                                    <option value="moderate">🟡 Moderate</option>
-                                                    <option value="high">🟠 High</option>
-                                                    <option value="severe">🔴 Severe</option>
-                                                </select>
-                                            </div>
-
-                                            <div>
-                                                <label className="block text-sm font-semibold mb-2">
-                                                    {getWeatherIcon(weatherCondition)} Weather
-                                                </label>
-                                                <select
-                                                    value={weatherCondition}
-                                                    onChange={(e) => setWeatherCondition(e.target.value)}
-                                                    className="w-full p-2 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
-                                                    disabled={currentView === 'routes' || currentView === 'comparison'}
-                                                >
-                                                    <option value="clear">☀️ Clear</option>
-                                                    <option value="light_rain">🌦️ Light Rain</option>
-                                                    <option value="heavy_rain">🌧️ Heavy Rain</option>
-                                                    <option value="flooding">⛈️ Flooding</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
                                 )}
 
                                 {/* Optimize Button */}
@@ -884,22 +924,22 @@
                                     </button>
                                 )}
 
-                                {/* Route Comparison */}
+                                {/* Route Comparison Results */}
                                 {allRoutes && currentView === 'routes' && (
                                     <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg shadow-lg border-2 border-green-200">
                                         <h3 className="font-bold mb-3 text-gray-800 flex items-center text-lg">
                                             <span className="mr-2">✅</span> 
-                                            Route Comparison Results
+                                            Route Optimization Results
                                         </h3>
 
                                         <div className="space-y-3">
                                             {/* Baseline Route */}
                                             <div className="bg-blue-100 p-3 rounded-lg border-2 border-blue-300">
                                                 <div className="font-bold text-blue-800 mb-2">
-                                                    📍 Baseline
+                                                    🔵 Baseline
                                                 </div>
                                                 <div className="text-sm space-y-1">
-                                                    <div>📏 Distance: <strong>{allRoutes.results.nearest_neighbor.total_distance_km} km</strong></div>
+                                                    <div>🚗 Distance: <strong>{allRoutes.results.nearest_neighbor.total_distance_km} km</strong></div>
                                                     <div>⏱️ Time: <strong>{(allRoutes.results.nearest_neighbor.total_time_hours * 60).toFixed(0)} min</strong></div>
                                                     <div>🎯 Urgent Success: <strong>{allRoutes.results.nearest_neighbor.urgent_on_time}%</strong></div>
                                                 </div>
@@ -911,7 +951,7 @@
                                                     🎯 Optimal
                                                 </div>
                                                 <div className="text-sm space-y-1">
-                                                    <div>📏 Distance: <strong>{allRoutes.results[allRoutes.best_method].total_distance_km} km</strong></div>
+                                                    <div>🚗 Distance: <strong>{allRoutes.results[allRoutes.best_method].total_distance_km} km</strong></div>
                                                     <div>⏱️ Time: <strong>{(allRoutes.results[allRoutes.best_method].total_time_hours * 60).toFixed(0)} min</strong></div>
                                                     <div>🎯 Urgent Success: <strong>{allRoutes.results[allRoutes.best_method].urgent_on_time}%</strong></div>
                                                 </div>
@@ -933,60 +973,10 @@
                                                 </div>
                                             </div>
 
-                                            {/* Compare Conditions */}
-                                            <div className="pt-3 border-t-2 border-green-300">
-                                                <h4 className="font-bold text-gray-700 mb-3">
-                                                    🔄 Compare Different Conditions
-                                                </h4>
-                                                
-                                                <div className="space-y-3">
-                                                    <div>
-                                                        <label className="block text-sm font-semibold mb-2">
-                                                            {getTrafficIcon(compareTraffic)} New Traffic
-                                                        </label>
-                                                        <select
-                                                            value={compareTraffic}
-                                                            onChange={(e) => setCompareTraffic(e.target.value)}
-                                                            className="w-full p-2 border-2 border-green-300 rounded-lg"
-                                                        >
-                                                            <option value="low">🟢 Low</option>
-                                                            <option value="moderate">🟡 Moderate</option>
-                                                            <option value="high">🟠 High</option>
-                                                            <option value="severe">🔴 Severe</option>
-                                                        </select>
-                                                    </div>
-
-                                                    <div>
-                                                        <label className="block text-sm font-semibold mb-2">
-                                                            {getWeatherIcon(compareWeather)} New Weather
-                                                        </label>
-                                                        <select
-                                                            value={compareWeather}
-                                                            onChange={(e) => setCompareWeather(e.target.value)}
-                                                            className="w-full p-2 border-2 border-green-300 rounded-lg"
-                                                        >
-                                                            <option value="clear">☀️ Clear</option>
-                                                            <option value="light_rain">🌦️ Light Rain</option>
-                                                            <option value="heavy_rain">🌧️ Heavy Rain</option>
-                                                            <option value="flooding">⛈️ Flooding</option>
-                                                        </select>
-                                                    </div>
-
-                                                    <button
-                                                        onClick={compareConditions}
-                                                        disabled={loading}
-                                                        className="w-full bg-gradient-to-r from-orange-500 to-red-600 text-white py-3 rounded-lg font-bold hover:from-orange-600 hover:to-red-700 disabled:from-gray-400 disabled:to-gray-500 transition-all shadow"
-                                                    >
-                                                        {loading ? '⏳ Comparing...' : '🔍 Compare Impact'}
-                                                    </button>
-                                                </div>
-                                            </div>
-
                                             <button
                                                 onClick={() => {
                                                     setCurrentView('mailList');
                                                     setAllRoutes(null);
-                                                    setComparisonRoutes(null);
                                                 }}
                                                 className="w-full bg-gray-600 text-white py-2 rounded-lg font-semibold hover:bg-gray-700 transition-all"
                                             >
@@ -1093,7 +1083,7 @@
                                                             disabled={!newLatitude || !newLongitude || loading}
                                                             className="w-full bg-gradient-to-r from-purple-500 to-pink-600 text-white py-3 rounded-lg font-bold hover:from-purple-600 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-500 transition-all shadow"
                                                         >
-                                                            {loading ? '⏳ Analyzing...' : '📍 Analyze Relocation Impact'}
+                                                            {loading ? '⏳ Analyzing...' : '🔍 Analyze Relocation Impact'}
                                                         </button>
                                                     </>
                                                 )}
@@ -1126,25 +1116,24 @@
                                                 </div>
                                             </div>
 
-                                            {/* Before Relocation */}
+                                            {/* Before/After Comparison */}
                                             <div className="bg-blue-100 p-3 rounded-lg border-2 border-blue-300">
                                                 <div className="font-bold text-blue-800 mb-2">
-                                                    📍 Before Relocation
+                                                    🔵 Before Relocation
                                                 </div>
                                                 <div className="text-sm space-y-1">
-                                                    <div>📏 Distance: <strong>{relocationRoutes.original.results[relocationRoutes.original.best_method].total_distance_km} km</strong></div>
+                                                    <div>🚗 Distance: <strong>{relocationRoutes.original.results[relocationRoutes.original.best_method].total_distance_km} km</strong></div>
                                                     <div>⏱️ Time: <strong>{(relocationRoutes.original.results[relocationRoutes.original.best_method].total_time_hours * 60).toFixed(0)} min</strong></div>
                                                     <div>🎯 Urgent Success: <strong>{relocationRoutes.original.results[relocationRoutes.original.best_method].urgent_on_time}%</strong></div>
                                                 </div>
                                             </div>
 
-                                            {/* After Relocation */}
                                             <div className="bg-green-100 p-3 rounded-lg border-2 border-green-300">
                                                 <div className="font-bold text-green-800 mb-2">
-                                                    📍 After Relocation
+                                                    🟢 After Relocation
                                                 </div>
                                                 <div className="text-sm space-y-1">
-                                                    <div>📏 Distance: <strong>{relocationRoutes.new.results[relocationRoutes.new.best_method].total_distance_km} km</strong></div>
+                                                    <div>🚗 Distance: <strong>{relocationRoutes.new.results[relocationRoutes.new.best_method].total_distance_km} km</strong></div>
                                                     <div>⏱️ Time: <strong>{(relocationRoutes.new.results[relocationRoutes.new.best_method].total_time_hours * 60).toFixed(0)} min</strong></div>
                                                     <div>🎯 Urgent Success: <strong>{relocationRoutes.new.results[relocationRoutes.new.best_method].urgent_on_time}%</strong></div>
                                                 </div>
@@ -1194,95 +1183,12 @@
                                         </div>
                                     </div>
                                 )}
-
-                                {/* Conditions Comparison Results */}
-                                {comparisonRoutes && currentView === 'comparison' && (
-                                    <div className="bg-gradient-to-br from-orange-50 to-red-50 p-4 rounded-lg shadow-lg border-2 border-orange-300">
-                                        <h3 className="font-bold mb-3 text-gray-800 flex items-center text-lg">
-                                            <span className="mr-2">🔍</span> 
-                                            Conditions Impact Analysis
-                                        </h3>
-
-                                        <div className="space-y-3">
-                                            {/* Original Conditions */}
-                                            <div className="bg-blue-100 p-3 rounded-lg border-2 border-blue-300">
-                                                <div className="font-bold text-blue-800 mb-2">
-                                                    📍 Original Conditions
-                                                </div>
-                                                <div className="text-sm space-y-1">
-                                                    <div>{getTrafficIcon(trafficLevel)} Traffic: <strong>{trafficLevel}</strong></div>
-                                                    <div>{getWeatherIcon(weatherCondition)} Weather: <strong>{weatherCondition}</strong></div>
-                                                    <div className="pt-2 border-t border-blue-300">
-                                                        <div>📏 Distance: <strong>{allRoutes.results[allRoutes.best_method].total_distance_km} km</strong></div>
-                                                        <div>⏱️ Time: <strong>{(allRoutes.results[allRoutes.best_method].total_time_hours * 60).toFixed(0)} min</strong></div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* New Conditions */}
-                                            <div className="bg-red-100 p-3 rounded-lg border-2 border-red-300">
-                                                <div className="font-bold text-red-800 mb-2">
-                                                    🔄 New Conditions
-                                                </div>
-                                                <div className="text-sm space-y-1">
-                                                    <div>{getTrafficIcon(compareTraffic)} Traffic: <strong>{compareTraffic}</strong></div>
-                                                    <div>{getWeatherIcon(compareWeather)} Weather: <strong>{compareWeather}</strong></div>
-                                                    <div className="pt-2 border-t border-red-300">
-                                                        <div>📏 Distance: <strong>{comparisonRoutes.results[comparisonRoutes.best_method].total_distance_km} km</strong></div>
-                                                        <div>⏱️ Time: <strong>{(comparisonRoutes.results[comparisonRoutes.best_method].total_time_hours * 60).toFixed(0)} min</strong></div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Impact */}
-                                            <div className="bg-white p-3 rounded-lg shadow border-2 border-gray-200">
-                                                <div className="font-bold text-gray-800 mb-2">📊 Impact</div>
-                                                <div className="text-sm space-y-1">
-                                                    <div>Distance Change: <span className={`font-bold ${
-                                                        (comparisonRoutes.results[comparisonRoutes.best_method].total_distance_km - allRoutes.results[allRoutes.best_method].total_distance_km) > 0 
-                                                            ? 'text-red-600' : 'text-green-600'
-                                                    }`}>
-                                                        {(comparisonRoutes.results[comparisonRoutes.best_method].total_distance_km - allRoutes.results[allRoutes.best_method].total_distance_km) > 0 ? '+' : ''}
-                                                        {(comparisonRoutes.results[comparisonRoutes.best_method].total_distance_km - allRoutes.results[allRoutes.best_method].total_distance_km).toFixed(2)} km
-                                                    </span></div>
-                                                    <div>Time Change: <span className={`font-bold ${
-                                                        ((comparisonRoutes.results[comparisonRoutes.best_method].total_time_hours - allRoutes.results[allRoutes.best_method].total_time_hours) * 60) > 0 
-                                                            ? 'text-red-600' : 'text-green-600'
-                                                    }`}>
-                                                        {((comparisonRoutes.results[comparisonRoutes.best_method].total_time_hours - allRoutes.results[allRoutes.best_method].total_time_hours) * 60) > 0 ? '+' : ''}
-                                                        {((comparisonRoutes.results[comparisonRoutes.best_method].total_time_hours - allRoutes.results[allRoutes.best_method].total_time_hours) * 60).toFixed(0)} min
-                                                    </span></div>
-                                                </div>
-                                            </div>
-
-                                            <button
-                                                onClick={() => {
-                                                    setCurrentView('routes');
-                                                    setComparisonRoutes(null);
-                                                }}
-                                                className="w-full bg-gray-600 text-white py-2 rounded-lg font-semibold hover:bg-gray-700 transition-all"
-                                            >
-                                                ↩️ Back to Routes
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         </div>
 
                         {/* Main Content Area */}
                         <div className="flex-1 overflow-hidden">
-                            {!selectedZone && (
-                                <div className="flex items-center justify-center h-full bg-gradient-to-br from-gray-100 to-gray-200">
-                                    <div className="text-center p-8 bg-white rounded-lg shadow-xl">
-                                        <div className="text-6xl mb-4">🗺️</div>
-                                        <p className="text-gray-600 text-xl font-semibold mb-2">Select a postal zone to begin</p>
-                                        <p className="text-gray-400 text-sm">Choose from the dropdown menu on the left</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {selectedZone && currentView === 'upload' && (
+                            {currentView === 'upload' && (
                                 <div className="flex items-center justify-center h-full bg-gradient-to-br from-blue-50 to-indigo-50">
                                     <div className="text-center p-8 bg-white rounded-lg shadow-xl max-w-md">
                                         <div className="text-6xl mb-4">📤</div>
@@ -1301,7 +1207,7 @@
                                 </div>
                             )}
 
-                            {selectedZone && currentView === 'mailList' && (
+                            {currentView === 'mailList' && (
                                 <div className="h-full overflow-y-auto bg-gray-50 p-6">
                                     <div className="max-w-6xl mx-auto">
                                         <h2 className="text-2xl font-bold mb-4 text-gray-800">📋 Mail Classification List</h2>
@@ -1314,7 +1220,6 @@
                                                         <th className="px-4 py-3 text-left">Address</th>
                                                         <th className="px-4 py-3 text-left">Mail Type</th>
                                                         <th className="px-4 py-3 text-center">Priority</th>
-                                                       
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -1345,7 +1250,6 @@
                                                                     {delivery.priority === 'urgent' ? '🔴 URGENT' : '🔵 REGULAR'}
                                                                 </span>
                                                             </td>
-                                                           
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -1362,11 +1266,11 @@
                                 </div>
                             )}
 
-                            {selectedZone && currentView === 'routes' && allRoutes && (
+                            {currentView === 'routes' && allRoutes && (
                                 <MapView 
                                     deliveries={deliveries}
                                     route={null}
-                                    center={center}
+                                    center={mapCenter}
                                     showRoute={false}
                                     comparisonMode={true}
                                     baselineRoute={allRoutes.results.nearest_neighbor.deliveries.slice(1)}
@@ -1375,46 +1279,11 @@
                                 />
                             )}
 
-                            {selectedZone && currentView === 'comparison' && comparisonRoutes && (
-                                <div className="h-full flex">
-                                    <div className="flex-1 border-r">
-                                        <div className="bg-blue-600 text-white p-2 text-center font-bold">
-                                            Original: {getTrafficIcon(trafficLevel)} {trafficLevel} / {getWeatherIcon(weatherCondition)} {weatherCondition}
-                                        </div>
-                                        <div className="h-[calc(100%-40px)]">
-                                            <MapView 
-                                                deliveries={deliveries}
-                                                route={allRoutes.results[allRoutes.best_method].deliveries.slice(1)}
-                                                center={center}
-                                                showRoute={true}
-                                                comparisonMode={false}
-                                                showLabels={false}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="bg-red-600 text-white p-2 text-center font-bold">
-                                            New: {getTrafficIcon(compareTraffic)} {compareTraffic} / {getWeatherIcon(compareWeather)} {compareWeather}
-                                        </div>
-                                        <div className="h-[calc(100%-40px)]">
-                                            <MapView 
-                                                deliveries={deliveries}
-                                                route={comparisonRoutes.results[comparisonRoutes.best_method].deliveries.slice(1)}
-                                                center={center}
-                                                showRoute={true}
-                                                comparisonMode={false}
-                                                showLabels={false}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {selectedZone && currentView === 'relocation' && relocationRoutes && relocationData && (
+                            {currentView === 'relocation' && relocationRoutes && relocationData && (
                                 <MapView 
                                     deliveries={deliveries}
                                     route={null}
-                                    center={center}
+                                    center={mapCenter}
                                     showRoute={false}
                                     comparisonMode={false}
                                     relocationMode={true}
