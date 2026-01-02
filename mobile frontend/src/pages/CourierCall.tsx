@@ -89,7 +89,13 @@ const CourierCall = () => {
                     <button
                         onClick={() => {
                             setIsCallActive(false);
-                            navigate(-1);
+                            // Navigate back with voice verification status
+                            const isVoiceVerified = voiceStatus === 'human';
+                            if (orderId) {
+                                navigate(`/courier/delivery/${orderId}?voiceVerified=${isVoiceVerified}`);
+                            } else {
+                                navigate(-1);
+                            }
                         }}
                         className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center shadow-lg hover:bg-red-600 transition-transform active:scale-95"
                     >

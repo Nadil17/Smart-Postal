@@ -1,3 +1,27 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Reset for full-screen app */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+/* Leaflet map fixes */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* Custom marker styles */
+.custom-delivery-marker,
+.custom-start-marker,
+.custom-stop-marker,
+.route-arrow {
+  background: transparent !important;
+  border: none !important;
+}

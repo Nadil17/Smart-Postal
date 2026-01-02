@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, MessageSquare, Phone, Map, LogOut } from 'lucide-react';
+import { Home, MessageSquare, Map, LogOut } from 'lucide-react';
 import clsx from 'clsx';
 import { useDatabase } from '../context/MockDatabaseContext';
 
@@ -8,16 +8,21 @@ const Layout = () => {
     const navigate = useNavigate();
     const { logout, currentUserRole } = useDatabase();
 
+    // Check if we're on the route map page for full-height layout
+    const isMapRoute = location.pathname === '/route';
+
     const navItems = [
         { path: '/', icon: Home, label: 'Home', roles: ['client', 'courier'] },
         { path: '/ai-support', icon: MessageSquare, label: 'AI Support', roles: ['client', 'courier'] },
-        { path: '/call', icon: Phone, label: 'Call', roles: ['courier'] },
         { path: '/route', icon: Map, label: 'Route', roles: ['courier'] },
     ].filter(item => item.roles.includes(currentUserRole || ''));
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
-            <main className="flex-1 overflow-y-auto pb-20">
+            <main className={clsx(
+                "flex-1 pb-20",
+                isMapRoute ? "overflow-hidden" : "overflow-y-auto"
+            )}>
                 <Outlet />
             </main>
 

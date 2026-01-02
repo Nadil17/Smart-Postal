@@ -94,9 +94,11 @@ async def enroll_voice(
     ).first()
 
     if not voice_template:
+        embedding_bytes = pickle.dumps(new_embedding)
         voice_template = VoiceTemplate(
             user_id=current_user.id,
-            embedding_data=pickle.dumps(new_embedding),
+            embedding=embedding_bytes,  # Legacy column - required by DB
+            embedding_data=embedding_bytes,
             sample_count=1,
             is_active=True
         )
@@ -112,11 +114,15 @@ async def enroll_voice(
             # Re-normalize
             updated_embedding = updated_embedding / (np.linalg.norm(updated_embedding) + 1e-8)
             
-            voice_template.embedding_data = pickle.dumps(updated_embedding)
+            embedding_bytes = pickle.dumps(updated_embedding)
+            voice_template.embedding = embedding_bytes  # Legacy column
+            voice_template.embedding_data = embedding_bytes
             voice_template.sample_count += 1
         except (pickle.UnpicklingError, Exception) as e:
             # If old data is corrupted, replace it with new data
-            voice_template.embedding_data = pickle.dumps(new_embedding)
+            embedding_bytes = pickle.dumps(new_embedding)
+            voice_template.embedding = embedding_bytes  # Legacy column
+            voice_template.embedding_data = embedding_bytes
             voice_template.sample_count = 1
 
     db.commit()

@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, AlertTriangle, CheckCircle, Package } from 'lucide-react';
 import FaceScanner from '../../components/FaceScanner';
 import VerificationResult from '../../components/VerificationResult';
 import { useDatabase } from '../../context/MockDatabaseContext';
@@ -8,31 +8,42 @@ import { useDatabase } from '../../context/MockDatabaseContext';
 const DeliveryDetail = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { orders, updateOrder } = useDatabase();
     const order = orders.find(o => o.id === id);
 
     const [step, setStep] = useState<'info' | 'scan' | 'result'>('info');
     const [resultStatus, setResultStatus] = useState<'success' | 'failed' | 'locker'>('success');
+    const [isVerified, setIsVerified] = useState(false);
+    const [verificationMethod, setVerificationMethod] = useState<'face' | 'voice' | null>(null);
+
+    // Check if returning from voice verification
+    useEffect(() => {
+        const voiceVerified = searchParams.get('voiceVerified');
+        if (voiceVerified === 'true') {
+            setIsVerified(true);
+            setVerificationMethod('voice');
+        }
+    }, [searchParams]);
 
     if (!order) return <div>Order not found</div>;
 
     const handleScanComplete = () => {
-        // Mock verification logic
-        // If neighbor NIC exists, higher chance of success for demo
-        const isSuccess = Math.random() > 0.3;
-        setResultStatus(isSuccess ? 'success' : 'failed');
+        // Face scan successful - verification passed
+        setResultStatus('success');
         setStep('result');
+        setIsVerified(true);
+        setVerificationMethod('face');
+    };
 
-        if (isSuccess) {
-            updateOrder(order.id, { status: 'delivered' });
-        } else {
-            // If failed, user might choose locker
-        }
+    const handleCompleteDelivery = () => {
+        updateOrder(order.id, { status: 'delivered' });
+        navigate('/courier/dashboard');
     };
 
     const handleLockerRedirect = () => {
-        setResultStatus('locker');
         updateOrder(order.id, { status: 'locker' });
+        navigate('/courier/dashboard');
     };
 
     return (
@@ -95,7 +106,38 @@ const DeliveryDetail = () => {
                                 >
                                     Verify Identity (Face)
                                 </button>
+
+                                {/* Show Complete button if verified via voice */}
+                                {isVerified && verificationMethod === 'voice' && (
+                                    <div className="mt-4 p-4 bg-green-50 rounded-xl border border-green-200">
+                                        <div className="flex items-center gap-2 text-green-700 mb-3">
+                                            <CheckCircle size={20} />
+                                            <span className="font-medium">Voice Verified Successfully</span>
+                                        </div>
+                                        <button
+                                            onClick={handleCompleteDelivery}
+                                            className="w-full py-3 px-4 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700 flex items-center justify-center gap-2"
+                                        >
+                                            ✓ Complete Delivery
+                                        </button>
+                                    </div>
+                                )}
                             </div>
+                        </div>
+
+                        {/* Deposit to Locker Section */}
+                        <div className="bg-white p-4 rounded-2xl shadow-sm">
+                            <h2 className="font-semibold mb-2">Alternative Option</h2>
+                            <p className="text-sm text-gray-600 mb-4">
+                                If recipient is unavailable or verification is not possible, deposit the package in a Smart Locker.
+                            </p>
+                            <button
+                                onClick={handleLockerRedirect}
+                                className="w-full py-3 bg-orange-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-orange-700"
+                            >
+                                <Package size={20} />
+                                Deposit in Smart Locker
+                            </button>
                         </div>
                     </div>
                 )}
@@ -120,15 +162,18 @@ const DeliveryDetail = () => {
                     <div className="bg-white rounded-2xl shadow-sm">
                         <VerificationResult
                             status={resultStatus}
-                            onReset={() => setStep('info')}
+                            onReset={() => {
+                                setStep('info');
+                                setIsVerified(false);
+                            }}
                         />
-                        {resultStatus === 'failed' && (
+                        {resultStatus === 'success' && (
                             <div className="p-4 pt-0">
                                 <button
-                                    onClick={handleLockerRedirect}
-                                    className="w-full py-3 px-4 rounded-xl bg-orange-600 text-white font-medium hover:bg-orange-700"
+                                    onClick={handleCompleteDelivery}
+                                    className="w-full py-3 px-4 rounded-xl bg-green-600 text-white font-bold hover:bg-green-700 flex items-center justify-center gap-2"
                                 >
-                                    Deposit in Smart Locker
+                                    ✓ Complete Delivery
                                 </button>
                             </div>
                         )}

@@ -10,6 +10,7 @@ class VoiceTemplate(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Voice data (encrypted embeddings)
+    embedding = Column(LargeBinary, nullable=True)  # Legacy column - kept for DB compatibility
     embedding_data = Column(LargeBinary, nullable=False)  # Encrypted voice embedding
     sample_count = Column(Integer, default=0)
     
