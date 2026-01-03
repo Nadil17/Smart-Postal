@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Postal - Voice + Face Biometrics</title>
+    <title>Smart Postal - Voice Biometrics</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -65,8 +65,8 @@
     </style>
 </head>
 <body>
-    <h1>🏦 Smart Postal - Multi-Modal Biometric System</h1>
-    <p style="text-align: center; color: #666; margin-top: -10px;">Banking-Grade Voice + Face Recognition | Smart Locker Integration</p>
+    <h1>🏦 Smart Postal - Voice Biometric System</h1>
+    <p style="text-align: center; color: #666; margin-top: -10px;">Banking-Grade Voice Recognition</p>
 
     <!-- Auth Section -->
     <div class="container" id="auth-section">
@@ -153,93 +153,6 @@
 
         <hr>
 
-        <!-- Face Recognition Section -->
-        <div class="form-group">
-            <h3>3. Face ID Enrollment (ID Card)</h3>
-            <p>Upload your ID card photo to extract and enroll your face template. 📸</p>
-            <div style="background-color: #d1ecf1; padding: 10px; border-radius: 4px; margin-bottom: 10px; border-left: 4px solid #17a2b8;">
-                <strong>ℹ️ Face Enrollment Requirements:</strong>
-                <ul style="margin: 5px 0; padding-left: 20px; font-size: 0.9em;">
-                    <li>Min face size: 80x80 pixels</li>
-                    <li>Brightness: 0.2-0.9 (auto-adjusted)</li>
-                    <li>Liveness detection: texture, color, edge, frequency analysis</li>
-                    <li>Clear frontal view required</li>
-                </ul>
-            </div>
-            <input type="file" id="face-enroll-file" accept="image/*">
-            <br><br>
-            <div class="form-group">
-                <label>Name on ID (optional):</label>
-                <input type="text" id="face-name" placeholder="Full name">
-            </div>
-            <div class="form-group">
-                <label>Phone on ID (optional):</label>
-                <input type="text" id="face-phone" placeholder="Phone number">
-            </div>
-            <div class="form-group">
-                <label>Address on ID (optional):</label>
-                <input type="text" id="face-address" placeholder="Address">
-            </div>
-            <button onclick="submitFaceEnrollment()" id="face-enroll-submit">📸 Enroll Face from ID Card</button>
-        </div>
-
-        <hr>
-
-        <!-- Face Verification Section -->
-        <div class="form-group">
-            <h3>4. Face Verification (Live Photo)</h3>
-            <p>Upload a live face photo to verify against enrolled template. 🔍</p>
-            <div class="form-group">
-                <label>User ID to verify:</label>
-                <input type="number" id="face-verify-user-id" placeholder="User ID">
-            </div>
-            <div class="form-group">
-                <label>Order ID (optional):</label>
-                <input type="number" id="face-verify-order-id" placeholder="Order ID">
-            </div>
-            <input type="file" id="face-verify-file" accept="image/*">
-            <br><br>
-            <button onclick="submitFaceVerification()" id="face-verify-submit">✅ Verify Face Identity</button>
-        </div>
-
-        <hr>
-
-        <!-- Locker Face Verification -->
-        <div class="form-group" style="background-color: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
-            <h3>5. 🔒 Smart Locker Face Unlock</h3>
-            <p>Verify face at smart locker camera to generate unlock token. <strong>Stricter liveness checks!</strong></p>
-            <div class="form-group">
-                <label>Locker ID:</label>
-                <input type="text" id="locker-id" placeholder="e.g., LOCKER-001">
-            </div>
-            <div class="form-group">
-                <label>User ID:</label>
-                <input type="number" id="locker-user-id" placeholder="User ID">
-            </div>
-            <div class="form-group">
-                <label>Parcel ID (optional):</label>
-                <input type="text" id="locker-parcel-id" placeholder="Parcel ID">
-            </div>
-            <input type="file" id="locker-face-file" accept="image/*">
-            <br><br>
-            <button onclick="submitLockerVerification()" id="locker-verify-submit">🔓 Verify Face at Locker</button>
-        </div>
-
-        <hr>
-
-        <!-- Locker Unlock Token Display -->
-        <div class="form-group hidden" id="locker-token-section" style="background-color: #d4edda; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745;">
-            <h3>✅ Unlock Token Generated</h3>
-            <p>Token expires in 5 minutes. Use it to unlock the locker:</p>
-            <div style="background-color: white; padding: 15px; border-radius: 5px; margin: 10px 0; font-family: monospace;">
-                <p style="font-size: 1.2em; font-weight: bold; color: #28a745; text-align: center; word-break: break-all;" id="locker-token-display"></p>
-            </div>
-            <button onclick="unlockLocker()" style="background-color: #28a745;">🔓 Unlock Locker Now</button>
-            <button onclick="closeTokenDisplay()" style="background-color: #6c757d;">Close</button>
-        </div>
-
-        <hr>
-
         <!-- Challenge Section (Hidden by default) -->
         <div class="form-group hidden" id="challenge-section" style="background-color: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
             <h3>⚠️ Active Liveness Challenge Required</h3>
@@ -260,9 +173,9 @@
 
         <!-- Info Section -->
         <div class="form-group" style="background-color: #e7f3ff; padding: 15px; border-radius: 5px; border-left: 4px solid #007bff;">
-            <h4 style="margin-top: 0;">🔐 Multi-Modal Biometric Security Features</h4>
+            <h4 style="margin-top: 0;">🔐 Voice Authentication Security Features</h4>
             
-            <h5 style="margin-top: 10px; color: #0056b3;">🎤 Voice Authentication (Banking-Grade)</h5>
+            <h5 style="margin-top: 10px; color: #0056b3;">🎤 Banking-Grade Voice Recognition</h5>
             <ul style="margin: 10px 0; padding-left: 20px;">
                 <li><strong>Multi-Metric Ensemble:</strong> 3 verification metrics (Cosine, Euclidean, Correlation)</li>
                 <li><strong>11-Layer AI Detection:</strong> MFCC, Spectral, Temporal, Phase, LFCC, Replay detection</li>
@@ -272,18 +185,6 @@
                 <li><strong>Risk-Based Decision Engine:</strong> 4-tier risk assessment (LOW/MEDIUM/HIGH/CRITICAL)</li>
                 <li><strong>Challenge-Response:</strong> Active liveness for high-risk attempts</li>
                 <li><strong>Thresholds:</strong> 80% ensemble + 65% cosine (balanced for accuracy)</li>
-            </ul>
-            
-            <h5 style="margin-top: 10px; color: #0056b3;">📸 Face Recognition (DeepFace + RetinaFace)</h5>
-            <ul style="margin: 10px 0; padding-left: 20px;">
-                <li><strong>Detection:</strong> RetinaFace high-accuracy detector + HOG fallback</li>
-                <li><strong>Embeddings:</strong> Facenet512 (512-dim) encrypted biometric vectors</li>
-                <li><strong>Quality Checks:</strong> Face size (≥80px), brightness (0.2-0.9), sharpness, frontal detection</li>
-                <li><strong>Liveness Detection:</strong> Texture variance, color saturation, edge density, frequency analysis</li>
-                <li><strong>Anti-Spoofing:</strong> Photo/screen attack prevention</li>
-                <li><strong>Verification Threshold:</strong> 60% cosine similarity (40% for locker)</li>
-                <li><strong>Smart Locker Integration:</strong> JWT-based unlock tokens (5min expiry)</li>
-                <li><strong>ID Card Processing:</strong> Automatic face extraction from ID documents</li>
             </ul>
         </div>
     </div>
@@ -625,247 +526,6 @@
                 cancelChallenge();
             } catch (e) {
                 log(`❌ Challenge error: ${e.message}`, 'error');
-            }
-        }
-
-        // ========== FACE RECOGNITION FUNCTIONS ==========
-        
-        async function submitFaceEnrollment() {
-            const fileInput = document.getElementById('face-enroll-file');
-            if (!fileInput.files[0]) {
-                log('Please select an ID card image first', 'error');
-                return;
-            }
-
-            if (!token) {
-                log('❌ Not authenticated. Please login first!', 'error');
-                return;
-            }
-
-            const name = document.getElementById('face-name').value;
-            const phone = document.getElementById('face-phone').value;
-            const address = document.getElementById('face-address').value;
-
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            if (name) formData.append('name', name);
-            if (phone) formData.append('phone', phone);
-            if (address) formData.append('address', address);
-
-            try {
-                log('📸 Processing ID card and extracting face...');
-                log(`🔑 Using token: ${token.substring(0, 20)}...`);
-                const res = await fetch(`${API_URL}/face/id/upload`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` },
-                    body: formData
-                });
-
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail?.error || data.detail || 'Face enrollment failed');
-
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                log(`✅ ${data.message}`, 'success');
-                log(`👤 User ID: ${data.user_id}`, 'success');
-                log(`🆔 Face ID: ${data.face_id}`, 'success');
-                log(`📊 Quality Score: ${data.quality_score.toFixed(2)}`, 'success');
-                log(`${data.liveness_passed ? '✅' : '❌'} Liveness Check: ${data.liveness_passed ? 'PASSED' : 'FAILED'}`, data.liveness_passed ? 'success' : 'error');
-                log('🔐 Face embedding encrypted and stored', 'success');
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-                // Reset form
-                fileInput.value = '';
-                document.getElementById('face-name').value = '';
-                document.getElementById('face-phone').value = '';
-                document.getElementById('face-address').value = '';
-            } catch (e) {
-                log(`❌ Face enrollment error: ${e.message}`, 'error');
-            }
-        }
-
-        async function submitFaceVerification() {
-            const fileInput = document.getElementById('face-verify-file');
-            const userId = document.getElementById('face-verify-user-id').value;
-
-            if (!fileInput.files[0]) {
-                log('Please select a face image first', 'error');
-                return;
-            }
-            if (!userId) {
-                log('Please enter User ID to verify', 'error');
-                return;
-            }
-
-            if (!token) {
-                log('❌ Not authenticated. Please login first!', 'error');
-                return;
-            }
-
-            const orderId = document.getElementById('face-verify-order-id').value;
-
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            formData.append('user_id', userId);
-            if (orderId) formData.append('order_id', orderId);
-
-            try {
-                log('🔍 Verifying face against stored template...');
-                const res = await fetch(`${API_URL}/face/verify`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` },
-                    body: formData
-                });
-
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.detail?.error || data.detail || 'Face verification failed');
-
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                
-                if (data.verified) {
-                    log(`✅ FACE VERIFIED SUCCESSFULLY!`, 'success');
-                    log(`👤 User ID ${userId} identity confirmed`, 'success');
-                } else {
-                    log(`❌ FACE VERIFICATION FAILED`, 'error');
-                    log(`👤 User ID ${userId} not matched`, 'error');
-                }
-                
-                log(`📊 Similarity Score: ${(data.similarity_score * 100).toFixed(1)}%`, data.verified ? 'success' : 'error');
-                log(`🎯 Threshold: ${(data.threshold * 100).toFixed(1)}%`, 'info');
-                log(`📈 Confidence: ${(data.confidence * 100).toFixed(1)}%`, data.verified ? 'success' : 'error');
-                
-                if (data.quality_score !== null) {
-                    log(`🖼️ Face Quality: ${data.quality_score.toFixed(2)}`, 'info');
-                }
-                
-                if (data.liveness_passed !== null) {
-                    log(`${data.liveness_passed ? '✅' : '❌'} Liveness Check: ${data.liveness_passed ? 'PASSED' : 'FAILED'}`, data.liveness_passed ? 'success' : 'error');
-                }
-                
-                log(`💬 ${data.message}`, data.verified ? 'success' : 'error');
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-                // Reset
-                fileInput.value = '';
-            } catch (e) {
-                log(`❌ Face verification error: ${e.message}`, 'error');
-            }
-        }
-
-        async function submitLockerVerification() {
-            const fileInput = document.getElementById('locker-face-file');
-            const lockerId = document.getElementById('locker-id').value;
-            const userId = document.getElementById('locker-user-id').value;
-
-            if (!fileInput.files[0]) {
-                log('Please select a face image first', 'error');
-                return;
-            }
-            if (!lockerId) {
-                log('Please enter Locker ID', 'error');
-                return;
-            }
-            if (!userId) {
-                log('Please enter User ID', 'error');
-                return;
-            }
-
-            const parcelId = document.getElementById('locker-parcel-id').value;
-
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            formData.append('locker_id', lockerId);
-            formData.append('user_id', userId);
-            if (parcelId) formData.append('parcel_id', parcelId);
-
-            try {
-                log('🔒 Verifying face at smart locker (STRICT mode)...');
-                const res = await fetch(`${API_URL}/face/locker/verify`, {
-                    method: 'POST',
-                    body: formData  // No auth needed for locker device
-                });
-
-                const data = await res.json();
-
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                
-                if (data.unlock) {
-                    log(`✅ LOCKER VERIFICATION SUCCESSFUL!`, 'success');
-                    log(`🔓 Unlock token generated`, 'success');
-                    log(`⏱️ Token expires in ${data.expires_in} seconds (${Math.floor(data.expires_in / 60)} minutes)`, 'success');
-                    log(`📊 Confidence: ${(data.confidence * 100).toFixed(1)}%`, 'success');
-                    
-                    // Show token display
-                    showLockerToken(data.token, lockerId);
-                } else {
-                    log(`❌ LOCKER VERIFICATION FAILED`, 'error');
-                    log(`🔒 Locker will remain locked`, 'error');
-                    log(`📊 Confidence: ${(data.confidence * 100).toFixed(1)}%`, 'error');
-                }
-                
-                log(`💬 ${data.message}`, data.unlock ? 'success' : 'error');
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-                // Reset
-                fileInput.value = '';
-            } catch (e) {
-                log(`❌ Locker verification error: ${e.message}`, 'error');
-            }
-        }
-
-        function showLockerToken(token, lockerId) {
-            document.getElementById('locker-token-section').classList.remove('hidden');
-            document.getElementById('locker-token-display').textContent = token;
-            
-            // Store for unlock
-            window.currentLockerToken = token;
-            window.currentLockerId = lockerId;
-            
-            // Scroll to token section
-            document.getElementById('locker-token-section').scrollIntoView({ behavior: 'smooth' });
-        }
-
-        function closeTokenDisplay() {
-            document.getElementById('locker-token-section').classList.add('hidden');
-            window.currentLockerToken = null;
-            window.currentLockerId = null;
-        }
-
-        async function unlockLocker() {
-            if (!window.currentLockerToken || !window.currentLockerId) {
-                log('No active unlock token', 'error');
-                return;
-            }
-
-            try {
-                log('🔓 Unlocking locker...');
-                const res = await fetch(`${API_URL}/face/locker/unlock`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        token: window.currentLockerToken,
-                        locker_id: window.currentLockerId
-                    })
-                });
-
-                const data = await res.json();
-
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                
-                if (data.success) {
-                    log(`✅ ${data.message}`, 'success');
-                    log(`🔓 Locker ${data.locker_id} unlocked successfully!`, 'success');
-                    log(`📋 Status: ${data.status}`, 'success');
-                    
-                    // Close token display
-                    closeTokenDisplay();
-                } else {
-                    log(`❌ ${data.message}`, 'error');
-                    log(`📋 Status: ${data.status}`, 'error');
-                }
-                
-                log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            } catch (e) {
-                log(`❌ Unlock error: ${e.message}`, 'error');
             }
         }
     </script>

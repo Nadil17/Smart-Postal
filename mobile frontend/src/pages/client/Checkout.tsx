@@ -1,44 +1,300 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ShoppingBag, MapPin, CreditCard, ShieldCheck, Truck, X, Mic, CheckCircle } from 'lucide-react';
 import { useDatabase } from '../../context/MockDatabaseContext';
 import clsx from 'clsx';
+import { enrollVoiceSample, loginUser, registerUser, type ApiError, type VoiceEnrollmentResponse } from '../../lib/api';
+import { convertBlobToWav } from '../../lib/audio/wav';
 
 const Checkout = () => {
     const navigate = useNavigate();
     const { updateOrder } = useDatabase();
     const [showVoiceModal, setShowVoiceModal] = useState(false);
-    const [voiceStep, setVoiceStep] = useState(1);
+    const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+    const [email, setEmail] = useState('');
+    const [fullName, setFullName] = useState('');
+    const [phone, setPhone] = useState('');
+    const [password, setPassword] = useState('');
+    const [authToken, setAuthToken] = useState<string | null>(null);
+    const [authBusy, setAuthBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const [enrollStatus, setEnrollStatus] = useState<VoiceEnrollmentResponse | null>(null);
+    const [uploadBusy, setUploadBusy] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [recordingProgress, setRecordingProgress] = useState(0);
-    const [completedRecordings, setCompletedRecordings] = useState<number[]>([]);
+    const [enrollMode, setEnrollMode] = useState<'live' | 'upload'>('live');
+    const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [uploadLabel, setUploadLabel] = useState<string | null>(null);
+
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+    const chunksRef = useRef<BlobPart[]>([]);
+    const recordTimerRef = useRef<number | null>(null);
     const [orderPlaced, setOrderPlaced] = useState(false);
 
-    const handleStartRecording = () => {
+    const samplesRequired = enrollStatus?.samples_required ?? 3;
+    const samplesRecorded = enrollStatus?.samples_recorded ?? 0;
+
+    const stepItems = useMemo(() => {
+        const n = Math.max(1, Math.min(samplesRequired, 6));
+        return Array.from({ length: n }, (_, i) => i + 1);
+    }, [samplesRequired]);
+
+    useEffect(() => {
+        // Require credential validation each time before enrollment.
+        if (!showVoiceModal) return;
+        setAuthToken(null);
+        setError(null);
+        setEnrollStatus(null);
+        setEnrollMode('live');
+        setSelectedFiles([]);
+        setUploadLabel(null);
+    }, [showVoiceModal]);
+
+    useEffect(() => {
+        return () => {
+            if (recordTimerRef.current) {
+                window.clearInterval(recordTimerRef.current);
+                recordTimerRef.current = null;
+            }
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+                mediaRecorderRef.current.stop();
+            }
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach(t => t.stop());
+                mediaStreamRef.current = null;
+            }
+        };
+    }, []);
+
+    const resetModalState = () => {
+        setError(null);
+        setAuthBusy(false);
+        setUploadBusy(false);
+        setIsRecording(false);
+        setRecordingProgress(0);
+        setEnrollStatus(null);
+        setEnrollMode('live');
+        setSelectedFiles([]);
+        setUploadLabel(null);
+        setAuthToken(null);
+
+        if (recordTimerRef.current) {
+            window.clearInterval(recordTimerRef.current);
+            recordTimerRef.current = null;
+        }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(t => t.stop());
+            mediaStreamRef.current = null;
+        }
+    };
+
+    const closeVoiceModal = () => {
+        setShowVoiceModal(false);
+        resetModalState();
+    };
+
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setAuthBusy(true);
+        try {
+            const res = await loginUser({ email, password });
+            setAuthToken(res.access_token);
+        } catch (err) {
+            const apiErr = err as ApiError;
+            setError(apiErr.message || 'Login failed');
+        } finally {
+            setAuthBusy(false);
+        }
+    };
+
+    const handleRegister = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+
+        const cleanedPhone = phone.replace(/\s|-/g, '');
+        if (!cleanedPhone || cleanedPhone.length < 10) {
+            setError('Phone must be at least 10 digits');
+            return;
+        }
+        if (!/^\d+$/.test(cleanedPhone)) {
+            setError('Phone must contain only digits');
+            return;
+        }
+        if (password.length < 8 || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+            setError('Password must be 8+ chars, include 1 uppercase letter and 1 digit');
+            return;
+        }
+
+        setAuthBusy(true);
+        try {
+            await registerUser({ email, phone: cleanedPhone, full_name: fullName, password, role: 'customer' });
+            const res = await loginUser({ email, password });
+            setAuthToken(res.access_token);
+        } catch (err) {
+            const apiErr = err as ApiError;
+            setError(apiErr.message || 'Registration failed');
+        } finally {
+            setAuthBusy(false);
+        }
+    };
+
+    const getSupportedMimeType = () => {
+        const candidates = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+        ];
+        for (const type of candidates) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
+        }
+        return '';
+    };
+
+    const completeEnrollment = () => {
+        updateOrder('ORD-001', { voiceEnrolled: true });
+        setShowVoiceModal(false);
+        setOrderPlaced(true);
+        resetModalState();
+    };
+
+    const uploadAudioBlobAsEnrollmentSample = async (blob: Blob, filenamePrefix: string) => {
+        if (!authToken) throw new Error('Missing auth token');
+        const wavBlob = await convertBlobToWav(blob, 16000);
+        const wavFile = new File([wavBlob], `${filenamePrefix}_${Date.now()}.wav`, { type: 'audio/wav' });
+        const res = await enrollVoiceSample(authToken, wavFile);
+        setEnrollStatus(res);
+        if (res.enrollment_complete) {
+            completeEnrollment();
+        }
+        return res;
+    };
+
+    const handleManualFiles = (files: FileList | null) => {
+        setError(null);
+        if (!files || files.length === 0) {
+            setSelectedFiles([]);
+            return;
+        }
+        setSelectedFiles(Array.from(files));
+    };
+
+    const uploadSelectedSamples = async () => {
+        if (!authToken) {
+            setError('Please log in first');
+            return;
+        }
+        if (!selectedFiles.length) {
+            setError('Please choose one or more audio files');
+            return;
+        }
+
+        setError(null);
+        setUploadBusy(true);
+        setUploadLabel(null);
+
+        try {
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                setUploadLabel(`Uploading ${i + 1} of ${selectedFiles.length}…`);
+                const res = await uploadAudioBlobAsEnrollmentSample(file, 'voice_upload');
+                if (res.enrollment_complete) return;
+            }
+            setUploadLabel('Upload complete. Add more samples if needed.');
+        } catch (err) {
+            const apiErr = err as ApiError;
+            setError(apiErr.message || 'Upload failed');
+        } finally {
+            setUploadBusy(false);
+        }
+    };
+
+    const recordAndEnrollOnce = async () => {
+        if (!authToken) {
+            setError('Please log in first');
+            return;
+        }
+        setError(null);
+        setUploadBusy(false);
         setIsRecording(true);
         setRecordingProgress(0);
 
-        const interval = setInterval(() => {
-            setRecordingProgress(prev => {
-                if (prev >= 100) {
-                    clearInterval(interval);
-                    setIsRecording(false);
-                    setCompletedRecordings(prev => [...prev, voiceStep]);
+        try {
+            if (!mediaStreamRef.current) {
+                mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
 
-                    if (voiceStep < 3) {
-                        setTimeout(() => setVoiceStep(voiceStep + 1), 500);
-                    } else {
-                        setTimeout(() => {
-                            updateOrder('ORD-001', { voiceEnrolled: true });
-                            setShowVoiceModal(false);
-                            setOrderPlaced(true);
-                        }, 1000);
+            chunksRef.current = [];
+            const mimeType = getSupportedMimeType();
+            const recorder = new MediaRecorder(mediaStreamRef.current, mimeType ? { mimeType } : undefined);
+            mediaRecorderRef.current = recorder;
+
+            recorder.ondataavailable = (ev) => {
+                if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
+            };
+
+            const stopPromise = new Promise<Blob>((resolve, reject) => {
+                recorder.onstop = () => {
+                    try {
+                        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+                        resolve(blob);
+                    } catch (e) {
+                        reject(e);
                     }
-                    return 100;
-                }
-                return prev + 3.33; // 3 seconds per recording
+                };
+                recorder.onerror = () => reject(new Error('Recording failed'));
             });
-        }, 100);
+
+            recorder.start();
+
+            // 3-second capture to match the prototype UX
+            const durationMs = 3000;
+            const startedAt = Date.now();
+            recordTimerRef.current = window.setInterval(() => {
+                const elapsed = Date.now() - startedAt;
+                const pct = Math.min(100, Math.round((elapsed / durationMs) * 100));
+                setRecordingProgress(pct);
+                if (pct >= 100 && recordTimerRef.current) {
+                    window.clearInterval(recordTimerRef.current);
+                    recordTimerRef.current = null;
+                }
+            }, 100);
+
+            window.setTimeout(() => {
+                if (recorder.state !== 'inactive') recorder.stop();
+            }, durationMs);
+
+            const rawBlob = await stopPromise;
+            setIsRecording(false);
+            setUploadBusy(true);
+            await uploadAudioBlobAsEnrollmentSample(rawBlob, 'voice');
+        } catch (err) {
+            const apiErr = err as ApiError;
+            // Backend sometimes returns a structured JSON detail object
+            if (apiErr?.detail && typeof apiErr.detail === 'object') {
+                const detail = apiErr.detail as any;
+                if (detail?.detail?.message) {
+                    setError(String(detail.detail.message));
+                } else if (detail?.detail?.error) {
+                    setError(String(detail.detail.error));
+                } else if (detail?.detail) {
+                    setError(typeof detail.detail === 'string' ? detail.detail : JSON.stringify(detail.detail));
+                } else {
+                    setError(apiErr.message || 'Voice enrollment failed');
+                }
+            } else {
+                setError(apiErr.message || 'Voice enrollment failed');
+            }
+        } finally {
+            setUploadBusy(false);
+            setIsRecording(false);
+        }
     };
 
     if (orderPlaced) {
@@ -195,7 +451,7 @@ const Checkout = () => {
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
                         <button
-                            onClick={() => setShowVoiceModal(false)}
+                            onClick={closeVoiceModal}
                             className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
                         >
                             <X size={24} />
@@ -211,82 +467,243 @@ const Checkout = () => {
                             </p>
                         </div>
 
-                        {/* Progress Indicators */}
-                        <div className="flex justify-center gap-3 mb-6">
-                            {[1, 2, 3].map(step => (
+                        {/* Auth / Enrollment */}
+                        {!authToken ? (
+                            <div className="mb-2">
+                                <div className="flex gap-2 mb-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setAuthMode('login'); setError(null); }}
+                                        className={clsx(
+                                            'flex-1 py-2 rounded-lg font-bold border',
+                                            authMode === 'login' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'
+                                        )}
+                                    >
+                                        Log in
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setAuthMode('register'); setError(null); }}
+                                        className={clsx(
+                                            'flex-1 py-2 rounded-lg font-bold border',
+                                            authMode === 'register' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'
+                                        )}
+                                    >
+                                        Register
+                                    </button>
+                                </div>
+
+                                <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="space-y-3">
+                                    {authMode === 'register' && (
+                                        <>
+                                            <input
+                                                value={fullName}
+                                                onChange={(e) => setFullName(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="Full name"
+                                                required
+                                            />
+                                            <input
+                                                value={phone}
+                                                onChange={(e) => setPhone(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                placeholder="Phone (digits only)"
+                                                required
+                                            />
+                                            <p className="text-xs text-gray-500">
+                                                Password must be 8+ chars, include 1 uppercase letter and 1 digit.
+                                            </p>
+                                        </>
+                                    )}
+
+                                    <input
+                                        type="email"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Email"
+                                        required
+                                    />
+                                    <input
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Password"
+                                        required
+                                    />
+
+                                    {error && (
+                                        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                                            {error}
+                                        </div>
+                                    )}
+
+                                    <button
+                                        type="submit"
+                                        disabled={authBusy}
+                                        className={clsx(
+                                            'w-full py-3 rounded-lg font-bold shadow-lg transition-colors',
+                                            authBusy ? 'bg-gray-300 text-gray-600' : 'bg-blue-600 text-white hover:bg-blue-700'
+                                        )}
+                                    >
+                                        {authMode === 'login' ? (authBusy ? 'Signing in…' : 'Sign in') : (authBusy ? 'Creating account…' : 'Create account')}
+                                    </button>
+                                </form>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex gap-2 mb-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEnrollMode('live'); setError(null); setUploadLabel(null); }}
+                                        className={clsx(
+                                            'flex-1 py-2 rounded-lg font-bold border',
+                                            enrollMode === 'live' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'
+                                        )}
+                                    >
+                                        Live enrollment
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEnrollMode('upload'); setError(null); setUploadLabel(null); }}
+                                        className={clsx(
+                                            'flex-1 py-2 rounded-lg font-bold border',
+                                            enrollMode === 'upload' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'
+                                        )}
+                                    >
+                                        Manual samples
+                                    </button>
+                                </div>
+
+                                {/* Progress Indicators */}
+                                <div className="flex justify-center gap-3 mb-6">
+                                    {stepItems.map(step => (
                                 <div
                                     key={step}
                                     className={clsx(
                                         "w-12 h-12 rounded-full flex items-center justify-center font-bold transition-all",
-                                        completedRecordings.includes(step)
+                                        step <= samplesRecorded
                                             ? "bg-green-500 text-white"
-                                            : voiceStep === step
+                                            : step === (samplesRecorded + 1)
                                                 ? "bg-blue-600 text-white ring-4 ring-blue-200"
                                                 : "bg-gray-200 text-gray-500"
                                     )}
                                 >
-                                    {completedRecordings.includes(step) ? <CheckCircle size={20} /> : step}
+                                    {step <= samplesRecorded ? <CheckCircle size={20} /> : step}
                                 </div>
-                            ))}
-                        </div>
+                                    ))}
+                                </div>
 
-                        {/* Instructions */}
-                        <div className="bg-blue-50 rounded-lg p-4 mb-6 border border-blue-200">
-                            <p className="text-center font-medium text-gray-800 mb-2">
-                                Recording {voiceStep} of 3
-                            </p>
-                            <p className="text-center text-lg font-bold text-blue-600 italic">
-                                "My name is [Your Name]"
-                            </p>
-                        </div>
-
-                        {/* Record Button */}
-                        <div className="flex flex-col items-center">
-                            <button
-                                onClick={handleStartRecording}
-                                disabled={isRecording || completedRecordings.includes(voiceStep)}
-                                className={clsx(
-                                    "w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg mb-4",
-                                    completedRecordings.includes(voiceStep)
-                                        ? "bg-green-500 text-white"
-                                        : isRecording
-                                            ? "bg-red-500 text-white animate-pulse"
-                                            : "bg-blue-600 text-white hover:bg-blue-700 active:scale-95"
-                                )}
-                            >
-                                {completedRecordings.includes(voiceStep) ? (
-                                    <CheckCircle size={40} />
-                                ) : (
-                                    <Mic size={40} />
-                                )}
-                            </button>
-
-                            {isRecording && (
-                                <div className="w-full">
-                                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-blue-600 transition-all duration-100"
-                                            style={{ width: `${recordingProgress}%` }}
-                                        />
-                                    </div>
-                                    <p className="text-center text-sm text-gray-600 mt-2">
-                                        Recording... {Math.round(recordingProgress)}%
+                                {/* Instructions */}
+                                <div className="bg-blue-50 rounded-lg p-4 mb-6 border border-blue-200">
+                                    <p className="text-center font-medium text-gray-800 mb-2">
+                                        Recording {Math.min(samplesRecorded + 1, samplesRequired)} of {samplesRequired}
                                     </p>
+                                    {enrollMode === 'live' ? (
+                                        <p className="text-center text-lg font-bold text-blue-600 italic">
+                                            "My name is [Your Name]"
+                                        </p>
+                                    ) : (
+                                        <p className="text-center text-sm text-gray-700">
+                                            Upload existing voice recordings (audio files). We’ll convert them to WAV and enroll.
+                                        </p>
+                                    )}
+                                    {enrollStatus?.message && (
+                                        <p className="text-center text-xs text-gray-600 mt-2">{enrollStatus.message}</p>
+                                    )}
                                 </div>
-                            )}
 
-                            {!isRecording && !completedRecordings.includes(voiceStep) && (
-                                <p className="text-sm text-gray-600">Tap to start recording</p>
-                            )}
+                                {/* Live Record Button */}
+                                <div className="flex flex-col items-center">
+                                    {enrollMode === 'live' ? (
+                                        <button
+                                            onClick={recordAndEnrollOnce}
+                                            disabled={isRecording || uploadBusy || (samplesRecorded >= samplesRequired)}
+                                            className={clsx(
+                                                "w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-lg mb-4",
+                                                (samplesRecorded >= samplesRequired)
+                                                    ? "bg-green-500 text-white"
+                                                    : isRecording
+                                                        ? "bg-red-500 text-white animate-pulse"
+                                                        : uploadBusy
+                                                            ? "bg-gray-300 text-gray-600"
+                                                            : "bg-blue-600 text-white hover:bg-blue-700 active:scale-95"
+                                            )}
+                                        >
+                                            {(samplesRecorded >= samplesRequired) ? (
+                                                <CheckCircle size={40} />
+                                            ) : (
+                                                <Mic size={40} />
+                                            )}
+                                        </button>
+                                    ) : (
+                                        <div className="w-full">
+                                            <input
+                                                type="file"
+                                                accept="audio/*"
+                                                multiple
+                                                onChange={(e) => handleManualFiles(e.target.files)}
+                                                className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-bold hover:file:bg-blue-700"
+                                                disabled={uploadBusy}
+                                            />
+                                            <div className="mt-3 flex items-center justify-between">
+                                                <p className="text-xs text-gray-600">
+                                                    {selectedFiles.length ? `${selectedFiles.length} file(s) selected` : 'No files selected'}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={uploadSelectedSamples}
+                                                    disabled={uploadBusy || !selectedFiles.length || (samplesRecorded >= samplesRequired)}
+                                                    className={clsx(
+                                                        'px-4 py-2 rounded-lg font-bold',
+                                                        uploadBusy || !selectedFiles.length || (samplesRecorded >= samplesRequired)
+                                                            ? 'bg-gray-300 text-gray-600'
+                                                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                                                    )}
+                                                >
+                                                    Upload
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
 
-                            {completedRecordings.includes(voiceStep) && voiceStep < 3 && (
-                                <p className="text-sm text-green-600 font-medium">✓ Recording {voiceStep} complete</p>
-                            )}
+                                    {isRecording && (
+                                        <div className="w-full">
+                                            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full bg-blue-600 transition-all duration-100"
+                                                    style={{ width: `${recordingProgress}%` }}
+                                                />
+                                            </div>
+                                            <p className="text-center text-sm text-gray-600 mt-2">
+                                                Recording... {Math.round(recordingProgress)}%
+                                            </p>
+                                        </div>
+                                    )}
 
-                            {completedRecordings.length === 3 && (
-                                <p className="text-sm text-green-600 font-medium">✓ All recordings complete! Processing...</p>
-                            )}
-                        </div>
+                                    {!isRecording && !uploadBusy && (samplesRecorded < samplesRequired) && (
+                                        <p className="text-sm text-gray-600">
+                                            {enrollMode === 'live' ? 'Tap to record and upload' : 'Upload samples to enroll'}
+                                        </p>
+                                    )}
+
+                                    {uploadBusy && (
+                                        <p className="text-sm text-gray-600">{uploadLabel ?? 'Uploading sample…'}</p>
+                                    )}
+
+                                    {!uploadBusy && uploadLabel && (
+                                        <p className="text-sm text-gray-600">{uploadLabel}</p>
+                                    )}
+
+                                    {error && (
+                                        <div className="mt-3 w-full p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                                            {error}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

@@ -4,6 +4,7 @@ import { ArrowLeft, AlertTriangle, CheckCircle, Package } from 'lucide-react';
 import FaceScanner from '../../components/FaceScanner';
 import VerificationResult from '../../components/VerificationResult';
 import { useDatabase } from '../../context/MockDatabaseContext';
+import VoiceCallVerification from '../../components/VoiceCallVerification';
 
 const DeliveryDetail = () => {
     const { id } = useParams();
@@ -16,6 +17,7 @@ const DeliveryDetail = () => {
     const [resultStatus, setResultStatus] = useState<'success' | 'failed' | 'locker'>('success');
     const [isVerified, setIsVerified] = useState(false);
     const [verificationMethod, setVerificationMethod] = useState<'face' | 'voice' | null>(null);
+	const [showVoiceCall, setShowVoiceCall] = useState(false);
 
     // Check if returning from voice verification
     useEffect(() => {
@@ -88,7 +90,8 @@ const DeliveryDetail = () => {
 
                             <div className="flex flex-col gap-3">
                                 <button
-                                    onClick={() => navigate(`/call?orderId=${order.id}`)}
+								type="button"
+                                    onClick={() => setShowVoiceCall(true)}
                                     className="w-full py-3 bg-green-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2"
                                 >
                                     <span className="text-xl">📞</span> Call & Verify Voice
@@ -180,6 +183,20 @@ const DeliveryDetail = () => {
                     </div>
                 )}
             </div>
+
+            {showVoiceCall && (
+                <VoiceCallVerification
+                    recipientName={order.recipientName}
+                    orderId={Number.isFinite(Number(order.id)) ? Number(order.id) : undefined}
+                    onClose={() => setShowVoiceCall(false)}
+                    onVerifiedChange={(ok) => {
+                        if (ok) {
+                            setIsVerified(true);
+                            setVerificationMethod('voice');
+                        }
+                    }}
+                />
+            )}
         </div>
     );
 };
