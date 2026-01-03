@@ -53,7 +53,7 @@ def get_db_connection():
         host="localhost",
         user="root",
         password="",
-        database="postal_optimization"
+        database="postal_optimizations"
     )
 
 # Pydantic Models
@@ -592,7 +592,283 @@ def get_route_statistics():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+# Pydantic model for real-time condition changes
+class ConditionChangeRequest(BaseModel):
+    zone_id: int
+    deliveries: List[DeliveryInput]
+    original_traffic: str = "moderate"
+    original_weather: str = "clear"
+    new_traffic: str
+    new_weather: str
+    optimization_method: Optional[str] = "q_learning"
 
+@app.post("/api/ml/change-conditions-realtime")
+def change_conditions_realtime(request: ConditionChangeRequest):
+    """
+    Real-time route comparison when traffic/weather conditions change
+    Perfect for Postman testing - shows original vs new routes instantly
+    
+    Example Postman body:
+    {
+        "zone_id": 1,
+        "deliveries": [...],
+        "original_traffic": "moderate",
+        "original_weather": "clear",
+        "new_traffic": "high",
+        "new_weather": "heavy_rain",
+        "optimization_method": "q_learning"
+    }
+    """
+    try:
+        # Prepare delivery points
+        delivery_points = [
+            {
+                'id': 0,
+                'address': 'Postal Depot',
+                'latitude': 6.9271,
+                'longitude': 79.8612,
+                'parcels': 0,
+                'urgent': 0
+            }
+        ]
+        
+        for idx, delivery in enumerate(request.deliveries, start=1):
+            delivery_points.append({
+                'id': idx,
+                'address': delivery.address,
+                'latitude': delivery.latitude,
+                'longitude': delivery.longitude,
+                'parcels': delivery.parcels or 1,
+                'urgent': 1 if delivery.priority == 'urgent' else 0,
+                'time_window': 4.0 if delivery.priority == 'urgent' else 8.0
+            })
+        
+        # Calculate ORIGINAL route with original conditions
+        original_scenario = {
+            'delivery_points': delivery_points,
+            'traffic_factor': get_traffic_factor(request.original_traffic),
+            'weather_factor': get_weather_factor(request.original_weather),
+            'traffic_level': request.original_traffic,
+            'weather_condition': request.original_weather
+        }
+        
+        # Calculate NEW route with new conditions
+        new_scenario = {
+            'delivery_points': delivery_points,
+            'traffic_factor': get_traffic_factor(request.new_traffic),
+            'weather_factor': get_weather_factor(request.new_weather),
+            'traffic_level': request.new_traffic,
+            'weather_condition': request.new_weather
+        }
+        
+        # Optimize both scenarios
+        method = request.optimization_method
+        
+        if method == "q_learning":
+            original_result = route_optimizer.q_learning_route(original_scenario, episodes=500)
+            new_result = route_optimizer.q_learning_route(new_scenario, episodes=500)
+        elif method == "2opt":
+            base_original = route_optimizer.nearest_neighbor_route(original_scenario)
+            original_result = route_optimizer.two_opt_improvement(original_scenario, base_original['route'])
+            base_new = route_optimizer.nearest_neighbor_route(new_scenario)
+            new_result = route_optimizer.two_opt_improvement(new_scenario, base_new['route'])
+        elif method == "urgent_priority":
+            original_result = route_optimizer.urgent_priority_route(original_scenario)
+            new_result = route_optimizer.urgent_priority_route(new_scenario)
+        else:  # nearest_neighbor
+            original_result = route_optimizer.nearest_neighbor_route(original_scenario)
+            new_result = route_optimizer.nearest_neighbor_route(new_scenario)
+        
+        # Calculate impacts
+        distance_change = new_result['total_distance_km'] - original_result['total_distance_km']
+        time_change = new_result['total_time_hours'] - original_result['total_time_hours']
+        urgent_change = new_result['urgent_on_time'] - original_result['urgent_on_time']
+        
+        distance_change_pct = (distance_change / original_result['total_distance_km'] * 100) if original_result['total_distance_km'] > 0 else 0
+        time_change_pct = (time_change / original_result['total_time_hours'] * 100) if original_result['total_time_hours'] > 0 else 0
+        
+        # Determine severity
+        def get_severity(dist_pct, time_pct, urgent_change):
+            if urgent_change < 0 or time_pct > 50:
+                return "CRITICAL"
+            elif time_pct > 30 or dist_pct > 30:
+                return "HIGH"
+            elif time_pct > 15 or dist_pct > 15:
+                return "MEDIUM"
+            elif time_pct > 5 or dist_pct > 5:
+                return "LOW"
+            else:
+                return "MINIMAL"
+        
+        severity = get_severity(distance_change_pct, time_change_pct, urgent_change)
+        
+        # Format response
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "zone_id": request.zone_id,
+            "optimization_method": method,
+            
+            "conditions": {
+                "original": {
+                    "traffic": request.original_traffic,
+                    "weather": request.original_weather,
+                    "traffic_factor": original_scenario['traffic_factor'],
+                    "weather_factor": original_scenario['weather_factor'],
+                    "combined_factor": original_scenario['traffic_factor'] * original_scenario['weather_factor']
+                },
+                "new": {
+                    "traffic": request.new_traffic,
+                    "weather": request.new_weather,
+                    "traffic_factor": new_scenario['traffic_factor'],
+                    "weather_factor": new_scenario['weather_factor'],
+                    "combined_factor": new_scenario['traffic_factor'] * new_scenario['weather_factor']
+                }
+            },
+            
+            "original_route": {
+                "sequence": original_result['route'],
+                "deliveries": format_route_for_map(original_result['route'], delivery_points),
+                "distance_km": original_result['total_distance_km'],
+                "time_hours": original_result['total_time_hours'],
+                "time_minutes": round(original_result['total_time_hours'] * 60, 0),
+                "urgent_on_time": original_result['urgent_on_time'],
+                "total_deliveries": len(delivery_points) - 1
+            },
+            
+            "new_route": {
+                "sequence": new_result['route'],
+                "deliveries": format_route_for_map(new_result['route'], delivery_points),
+                "distance_km": new_result['total_distance_km'],
+                "time_hours": new_result['total_time_hours'],
+                "time_minutes": round(new_result['total_time_hours'] * 60, 0),
+                "urgent_on_time": new_result['urgent_on_time'],
+                "total_deliveries": len(delivery_points) - 1
+            },
+            
+            "impact_analysis": {
+                "distance_change_km": round(distance_change, 2),
+                "distance_change_pct": round(distance_change_pct, 2),
+                "time_change_hours": round(time_change, 2),
+                "time_change_minutes": round(time_change * 60, 0),
+                "time_change_pct": round(time_change_pct, 2),
+                "urgent_deliveries_impact": urgent_change,
+                "severity": severity,
+                "recommendation": get_condition_recommendation(severity, distance_change, time_change)
+            },
+            
+            "route_comparison": {
+                "same_sequence": original_result['route'] == new_result['route'],
+                "sequence_similarity_pct": calculate_sequence_similarity(
+                    original_result['route'], 
+                    new_result['route']
+                )
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_condition_recommendation(severity: str, distance_change: float, time_change: float) -> str:
+    """Generate recommendation based on condition change impact"""
+    if severity == "CRITICAL":
+        return "⚠️ CRITICAL: Route significantly impacted. Consider delaying non-urgent deliveries or requesting additional vehicles."
+    elif severity == "HIGH":
+        return "🔴 HIGH IMPACT: Route efficiency reduced significantly. Re-optimize route and notify drivers of delays."
+    elif severity == "MEDIUM":
+        return "🟡 MODERATE IMPACT: Some delays expected. Update ETAs and monitor progress."
+    elif severity == "LOW":
+        return "🟢 LOW IMPACT: Minor delays possible. Route remains efficient."
+    else:
+        return "✅ MINIMAL IMPACT: Conditions have negligible effect on delivery schedule."
+
+def calculate_sequence_similarity(route1: List[int], route2: List[int]) -> float:
+    """Calculate how similar two route sequences are (0-100%)"""
+    if len(route1) != len(route2):
+        return 0.0
+    
+    matching_positions = sum(1 for i in range(len(route1)) if route1[i] == route2[i])
+    return round((matching_positions / len(route1)) * 100, 2)
+
+@app.post("/api/ml/simulate-condition-scenarios")
+def simulate_condition_scenarios(request: RouteOptimizationRequest):
+    """
+    Simulate multiple traffic/weather scenarios at once
+    Shows how the same route performs under different conditions
+    """
+    try:
+        # Prepare delivery points
+        delivery_points = [{'id': 0, 'address': 'Depot', 'latitude': 6.9271, 
+                           'longitude': 79.8612, 'parcels': 0, 'urgent': 0}]
+        
+        for idx, delivery in enumerate(request.deliveries, start=1):
+            delivery_points.append({
+                'id': idx,
+                'address': delivery.address,
+                'latitude': delivery.latitude,
+                'longitude': delivery.longitude,
+                'parcels': delivery.parcels or 1,
+                'urgent': 1 if delivery.priority == 'urgent' else 0,
+                'time_window': 4.0 if delivery.priority == 'urgent' else 8.0
+            })
+        
+        # Define scenarios to test
+        scenarios = [
+            {"traffic": "low", "weather": "clear"},
+            {"traffic": "moderate", "weather": "clear"},
+            {"traffic": "high", "weather": "clear"},
+            {"traffic": "moderate", "weather": "light_rain"},
+            {"traffic": "high", "weather": "heavy_rain"},
+            {"traffic": "severe", "weather": "flooding"},
+        ]
+        
+        results = []
+        
+        for scenario_config in scenarios:
+            scenario = {
+                'delivery_points': delivery_points,
+                'traffic_factor': get_traffic_factor(scenario_config['traffic']),
+                'weather_factor': get_weather_factor(scenario_config['weather']),
+                'traffic_level': scenario_config['traffic'],
+                'weather_condition': scenario_config['weather']
+            }
+            
+            route_result = route_optimizer.q_learning_route(scenario, episodes=300)
+            
+            results.append({
+                "scenario": scenario_config,
+                "factors": {
+                    "traffic_factor": scenario['traffic_factor'],
+                    "weather_factor": scenario['weather_factor'],
+                    "combined_factor": scenario['traffic_factor'] * scenario['weather_factor']
+                },
+                "route": {
+                    "distance_km": route_result['total_distance_km'],
+                    "time_hours": route_result['total_time_hours'],
+                    "time_minutes": round(route_result['total_time_hours'] * 60, 0),
+                    "urgent_on_time": route_result['urgent_on_time'],
+                    "sequence": route_result['route']
+                }
+            })
+        
+        # Find best and worst scenarios
+        best_scenario = min(results, key=lambda x: x['route']['time_hours'])
+        worst_scenario = max(results, key=lambda x: x['route']['time_hours'])
+        
+        return {
+            "zone_id": request.zone_id,
+            "total_scenarios": len(scenarios),
+            "scenarios": results,
+            "best_case": best_scenario,
+            "worst_case": worst_scenario,
+            "time_range": {
+                "min_minutes": round(best_scenario['route']['time_hours'] * 60, 0),
+                "max_minutes": round(worst_scenario['route']['time_hours'] * 60, 0),
+                "difference_minutes": round((worst_scenario['route']['time_hours'] - best_scenario['route']['time_hours']) * 60, 0)
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
