@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 from typing import Optional
 from io import BytesIO
+import os
 
 from models.database import get_db
 from models.user import User
@@ -22,11 +23,20 @@ from api.middleware.auth import get_current_user, get_current_admin
 from utils.face_recognition import face_processor
 from utils.locker import locker_manager
 from utils.security import encrypt_biometric_data, decrypt_biometric_data
+from utils.crypto_commitment import CryptographicCommitmentEngine, EventType
+from utils.blockchain import BlockchainService
 from config.settings import get_settings
 from loguru import logger
 
 router = APIRouter(prefix="/api/face", tags=["Face Recognition"])
 settings = get_settings()
+
+# Initialize blockchain service for proof recording
+blockchain_service = BlockchainService()
+commitment_engine = CryptographicCommitmentEngine()
+
+# Admin private key for blockchain transactions (use env variable in production)
+BLOCKCHAIN_PRIVATE_KEY = os.getenv("BLOCKCHAIN_ADMIN_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 
 
 @router.post("/id/upload", response_model=FaceIDUploadResponse)
@@ -321,9 +331,70 @@ async def verify_face(
         db.add(log)
         db.commit()
         
+        # ============================================================
+        # BLOCKCHAIN PROOF RECORDING (Privacy-First Protocol)
+        # ============================================================
+        blockchain_result = None
+        if blockchain_service.w3.is_connected() and blockchain_service.contract:
+            try:
+                # Generate delivery ID from order_id or create unique ID
+                delivery_id = f"ORD-{order_id}" if order_id else f"VERIFY-{log.id}"
+                
+                # Get NIC number from user (or use placeholder for privacy)
+                user_record = db.query(User).filter(User.id == user_id).first()
+                nic_number = user_record.nic_number if user_record and hasattr(user_record, 'nic_number') else f"USER-{user_id}"
+                
+                # Create cryptographic commitment (NO personal data stored on chain)
+                commitment = commitment_engine.create_identity_commitment(
+                    nic_number=nic_number,
+                    face_embedding=[similarity_score] * 512,  # Use similarity as proxy embedding
+                    liveness_result=liveness_passed,
+                    ai_confidence=similarity_score,
+                    delivery_id=delivery_id,
+                    event_type=EventType.CUSTOMER_VERIFIED if verified else EventType.CUSTOMER_VERIFIED,
+                    gps_latitude=6.9271,  # Colombo default - should come from request
+                    gps_longitude=79.8612,
+                    ai_model="ArcFace-v3"
+                )
+                
+                # Create proof token
+                proof = commitment_engine.create_proof_token(commitment)
+                
+                # Record proof on blockchain
+                blockchain_result = await blockchain_service.record_proof(
+                    token_hash=proof.token_hash,
+                    commitment_hash=commitment.commitment_hash,
+                    delivery_id=delivery_id,
+                    event_type="CUSTOMER_VERIFIED",
+                    status="PASS" if verified else "FAIL",
+                    confidence_score=similarity_score,
+                    gps_latitude=6.9271,
+                    gps_longitude=79.8612,
+                    ai_model="ArcFace-v3",
+                    private_key=BLOCKCHAIN_PRIVATE_KEY
+                )
+                
+                if blockchain_result and blockchain_result.get("success"):
+                    logger.info(f"⛓️  Blockchain proof recorded: TX {blockchain_result['tx_hash'][:20]}... Block #{blockchain_result['block_number']}")
+                else:
+                    logger.warning(f"⚠️ Blockchain recording failed: {blockchain_result}")
+                    
+            except Exception as blockchain_error:
+                logger.error(f"⚠️ Blockchain recording error (non-critical): {blockchain_error}")
+                # Don't fail the verification if blockchain fails - it's supplementary
+        
         logger.info(f"Face verification v3.0: {'✓ PASSED' if verified else '✗ FAILED'} - "
                    f"Similarity: {similarity_score:.3f}, Votes: {metrics['models_matched']}/{metrics['models_total']}, "
                    f"Courier Action: {courier_decision.action} ({courier_decision.risk_level})")
+        
+        # Add blockchain info to metrics if available
+        if blockchain_result and blockchain_result.get("success"):
+            metrics['blockchain'] = {
+                'recorded': True,
+                'tx_hash': blockchain_result['tx_hash'],
+                'block_number': blockchain_result['block_number'],
+                'commitment_hash': commitment.commitment_hash[:20] + "..."
+            }
         
         return FaceVerificationResponse(
             success=True,

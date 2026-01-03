@@ -1,0 +1,33 @@
+{
+  "name": "smart-postal-blockchain",
+  "version": "1.0.0",
+  "description": "Privacy-First Blockchain for Smart Postal Delivery Verification - Research Implementation",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy.js --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "deploy:mumbai": "hardhat run scripts/deploy.js --network mumbai",
+    "verify": "hardhat verify",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.0"
+  },
+  "keywords": [
+    "blockchain",
+    "delivery",
+    "biometric",
+    "privacy",
+    "smart-contract",
+    "research"
+  ],
+  "author": "Smart Postal Research Team",
+  "license": "MIT"
+}

@@ -62,6 +62,12 @@ const DeliveryDetail = () => {
                 setReferenceError(null);
                 const token = localStorage.getItem('token');
                 
+                if (!token) {
+                    // No token - redirect to login
+                    navigate('/login');
+                    return;
+                }
+                
                 const response = await fetch(`http://127.0.0.1:8000/api/face/reference/${order.customerId}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
@@ -71,6 +77,12 @@ const DeliveryDetail = () => {
                     if (data.success && data.image_data) {
                         setReferenceImage(data.image_data);
                     }
+                } else if (response.status === 401) {
+                    // Token expired - clear and redirect to login
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    navigate('/login');
+                    return;
                 } else if (response.status === 404) {
                     setReferenceError('Customer has not enrolled their face yet');
                 } else {
@@ -178,6 +190,15 @@ const DeliveryDetail = () => {
             });
 
             const data = await response.json();
+
+            if (response.status === 401) {
+                // Token expired - clear and redirect to login
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                setVerificationDetails('Session expired. Please log in again.');
+                navigate('/login');
+                return;
+            }
 
             if (response.ok && data.success) {
                 const similarity = (data.similarity_score * 100).toFixed(1);
