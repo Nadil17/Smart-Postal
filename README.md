@@ -18,7 +18,7 @@ A comprehensive Machine Learning-powered system for optimizing postal delivery r
 ## 🏗️ System Architecture
 
 ```
-<img width="1408" height="768" alt="System Architecture" src="https://github.com/Nadil17/Smart-Postal/blob/feature-route-optimization/image/System%20Architecture.png"/>
+<img width="600" alt="System Architecture" src="https://raw.githubusercontent.com/Nadil17/Smart-Postal/feature-route-optimization/image/System%20Architecture.png"/>
 
 
 ```
