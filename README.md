@@ -18,7 +18,7 @@ A comprehensive Machine Learning-powered system for optimizing postal delivery r
 ## 🏗️ System Architecture
 
 ```
-![System Architecture](image/System%20Architecture.png)
+![System Architecture](image/System Architecture.png)
 
 
 ```
