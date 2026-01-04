@@ -4,6 +4,7 @@ from .user import User, UserRole
 from .order import Order, OrderStatus
 from .biometric import VoiceTemplate, FingerprintTemplate, FaceTemplate, VerificationLog, Delivery
 from .blockchain import BlockchainProof, BlockchainSyncStatus
+from models.locker import LockerStation, LockerSlot, LockerTransaction, SlotSize, SlotStatus
 
 __all__ = [
     "Base",
@@ -20,5 +21,10 @@ __all__ = [
     "VerificationLog",
     "Delivery",
     "BlockchainProof",
-    "BlockchainSyncStatus"
+    "BlockchainSyncStatus",
+    "LockerStation",
+    "LockerSlot",
+    "LockerTransaction",
+    "SlotSize",
+    "SlotStatus",
 ]

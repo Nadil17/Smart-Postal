@@ -9,7 +9,8 @@ import {
   BarChart3, 
   Blocks,
   LogOut,
-  Menu
+  Menu,
+  MapPin
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -32,6 +33,7 @@ const AdminLayout = ({ children }: AdminLayoutProps) => {
     { name: 'Users', icon: Users, path: '/admin/users' },
     { name: 'Parcels', icon: Package, path: '/admin/parcels' },
     { name: 'Couriers', icon: Truck, path: '/admin/couriers' },
+    { name: 'Locker Network', icon: MapPin, path: '/admin/lockers' },
     { name: 'Analytics', icon: BarChart3, path: '/admin/analytics' },
     { name: 'Blockchain', icon: Blocks, path: '/admin/blockchain' },
   ];

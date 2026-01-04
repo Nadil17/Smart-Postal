@@ -17,7 +17,10 @@ import ParcelManagement from './pages/admin/ParcelManagement';
 import CourierManagement from './pages/admin/CourierManagement';
 import Analytics from './pages/admin/Analytics';
 import BlockchainMonitor from './pages/admin/BlockchainMonitor';
+import LockerNetworkMonitor from './pages/admin/LockerNetworkMonitor';
 import { DatabaseProvider } from './context/MockDatabaseContext';
+import LockerSelection from './pages/client/LockerSelection';
+import LockerNavigation from './pages/courier/LockerNavigation';
 
 const RoleBasedRedirect = () => {
   // Get user role from localStorage
@@ -60,6 +63,10 @@ function App() {
             <Route path="client/dashboard" element={<ClientDashboard />} />
             <Route path="client/authorize/:id" element={<AuthorizeNeighbor />} />
 
+                    {/* Locker Routes */}
+        <Route path="/client/locker-selection" element={<LockerSelection />} />
+        <Route path="/courier/locker/:orderId/:lockerId" element={<LockerNavigation />} />
+
             {/* Courier Routes */}
             <Route path="courier/dashboard" element={<CourierDashboard />} />
             <Route path="courier/delivery/:id" element={<DeliveryDetail />} />
@@ -78,6 +85,7 @@ function App() {
             <Route path="couriers" element={<CourierManagement />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="blockchain" element={<BlockchainMonitor />} />
+            <Route path="lockers" element={<LockerNetworkMonitor />} />
           </Route>
         </Routes>
       </Router>

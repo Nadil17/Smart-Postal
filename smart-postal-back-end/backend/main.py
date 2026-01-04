@@ -80,6 +80,11 @@ async def health_check():
         "environment": settings.ENVIRONMENT
     }
 
+# Include Locker router
+from api.routes import lockers
+
+app.include_router(lockers.router, prefix="/api/lockers", tags=["Lockers"])
+
 # Root endpoint
 @app.get("/")
 async def root():
