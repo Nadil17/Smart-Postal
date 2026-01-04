@@ -1,29 +1,60 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { LogIn, User, Lock } from 'lucide-react';
-import { useDatabase } from '../context/MockDatabaseContext';
 
 const Login = () => {
+    // We keep the variable name 'username' to match your UI, 
+    // but we will send it as 'email' to the backend.
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
-    const { login } = useDatabase();
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+        setLoading(true);
 
-        const success = login(username, password);
-        if (success) {
-            // Redirect based on role
-            if (username === 'client') {
-                navigate('/client/dashboard');
-            } else if (username === 'courier') {
-                navigate('/courier/dashboard');
+        try {
+            // 1. Point to your real FastAPI URL
+            const response = await fetch('http://127.0.0.1:8000/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                // 2. Mapping: send the UI 'username' to the backend 'email' field
+                body: JSON.stringify({ 
+                    email: username, 
+                    password: password 
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // 3. Store the Token and User Info in LocalStorage
+                localStorage.setItem('token', data.access_token);
+                localStorage.setItem('user', JSON.stringify(data.user));
+
+                // 4. Redirect based on the ROLE from MySQL
+                // Backend uses: 'customer', 'courier', 'admin'
+                const userRole = data.user.role;
+                
+                if (userRole === 'admin') {
+                    navigate('/admin/dashboard');
+                } else if (userRole === 'courier') {
+                    navigate('/courier/dashboard');
+                } else {
+                    // This handles 'customer' / 'client'
+                    navigate('/client/dashboard');
+                }
+            } else {
+                // Catches 'Invalid credentials' or 'Inactive account'
+                setError(data.detail || 'Login failed');
             }
-        } else {
-            setError('Invalid username or password');
+        } catch (err) {
+            setError('Cannot connect to Server. Please check if FastAPI and XAMPP are running.');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -41,7 +72,7 @@ const Login = () => {
                 <form onSubmit={handleSubmit} className="bg-white p-8 rounded-2xl shadow-lg">
                     <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Username
+                            Username (Email)
                         </label>
                         <div className="relative">
                             <User size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -50,7 +81,7 @@ const Login = () => {
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
                                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="Enter username"
+                                placeholder="Enter your email"
                                 required
                             />
                         </div>
@@ -81,15 +112,24 @@ const Login = () => {
 
                     <button
                         type="submit"
-                        className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors"
+                        disabled={loading}
+                        className="w-full py-3 bg-blue-600 text-white rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400"
                     >
-                        Sign In
+                        {loading ? 'Authenticating...' : 'Sign In'}
                     </button>
 
                     <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                        <p className="text-xs text-gray-600 font-medium mb-2">Demo Credentials:</p>
-                        <p className="text-xs text-gray-500">Client: <span className="font-mono">client / client123</span></p>
-                        <p className="text-xs text-gray-500">Courier: <span className="font-mono">courier / courier123</span></p>
+                        <p className="text-xs text-gray-600 font-medium mb-2">Login Help:</p>
+                        <p className="text-xs text-gray-500 italic">Use the email you registered with (e.g., dev_test_01@example.com)</p>
+                    </div>
+
+                    <div className="mt-6 text-center">
+                        <p className="text-sm text-gray-600">
+                            Don't have an account?{' '}
+                            <Link to="/register" className="text-blue-600 font-medium hover:text-blue-700">
+                                Create Account
+                            </Link>
+                        </p>
                     </div>
                 </form>
             </div>

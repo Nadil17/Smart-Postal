@@ -1,16 +1,30 @@
-import { Package, ShieldCheck } from 'lucide-react';
+import { Package, ShieldCheck, MapPin, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDatabase } from '../../context/MockDatabaseContext';
+import { useState, useEffect } from 'react';
 
 const ClientDashboard = () => {
     const { orders } = useDatabase();
     const navigate = useNavigate();
+    const [userName, setUserName] = useState('Client');
+
+    useEffect(() => {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+            try {
+                const user = JSON.parse(userStr);
+                setUserName(user.full_name || 'Client');
+            } catch (e) {
+                console.error('Error parsing user data');
+            }
+        }
+    }, []);
 
     return (
         <div className="flex flex-col h-full bg-gray-50">
             <header className="bg-white p-4 shadow-sm">
                 <h1 className="text-lg font-bold text-gray-800">My Parcels</h1>
-                <p className="text-xs text-gray-500">Welcome back, Client</p>
+                <p className="text-xs text-gray-500">Welcome back, {userName}</p>
             </header>
 
             <div className="p-4 flex flex-col gap-4">
@@ -31,13 +45,26 @@ const ClientDashboard = () => {
                         <p className="text-sm text-gray-600 mb-4">{order.address}</p>
 
                         {order.status === 'pending' && (
-                            <button
-                                onClick={() => navigate(`/client/authorize/${order.id}`)}
-                                className="w-full py-2 px-4 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors"
-                            >
-                                <ShieldCheck size={16} />
-                                Authorize Neighbor
-                            </button>
+                            <div className="space-y-2">
+                                {/* AI-Powered Locker Selection Button */}
+                                <button
+                                    onClick={() => navigate(`/client/locker-selection?orderId=${order.id}`)}
+                                    className="w-full py-2 px-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg text-sm font-medium flex items-center justify-center gap-2 hover:from-purple-700 hover:to-blue-700 transition-colors"
+                                >
+                                    <MapPin size={16} />
+                                    <span>Deliver to Smart Locker</span>
+                                    <Sparkles size={14} className="text-yellow-300" />
+                                </button>
+                                
+                                {/* Authorize Neighbor Button */}
+                                <button
+                                    onClick={() => navigate(`/client/authorize/${order.id}`)}
+                                    className="w-full py-2 px-4 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors"
+                                >
+                                    <ShieldCheck size={16} />
+                                    Authorize Neighbor
+                                </button>
+                            </div>
                         )}
 
                         {order.neighborNicImage && (
@@ -48,6 +75,16 @@ const ClientDashboard = () => {
                         )}
                     </div>
                 ))}
+
+                {orders.length === 0 && (
+                    <div className="bg-white p-8 rounded-xl shadow-sm text-center">
+                        <Package size={48} className="mx-auto text-gray-300 mb-4" />
+                        <h3 className="font-semibold text-gray-700">No Active Parcels</h3>
+                        <p className="text-sm text-gray-500 mt-2">
+                            Your incoming parcels will appear here
+                        </p>
+                    </div>
+                )}
             </div>
         </div>
     );

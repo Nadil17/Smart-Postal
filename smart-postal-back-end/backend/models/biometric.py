@@ -48,8 +48,9 @@ class FaceTemplate(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Face data (encrypted embeddings)
-    embedding_data = Column(LargeBinary, nullable=False)  # Encrypted 512-dim face embedding
+    embedding_data = Column(LargeBinary, nullable=True)  # Encrypted face embedding or raw image
     id_card_info = Column(Text, nullable=True)  # Encrypted ID card metadata
+    nic_image_data = Column(LargeBinary, nullable=True)  # Encrypted NIC/ID card image
     
     # Quality metrics
     face_quality_score = Column(Float, nullable=True)  # Face quality (0-1)

@@ -2,18 +2,41 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Home, MessageSquare, Phone, Map, LogOut } from 'lucide-react';
 import clsx from 'clsx';
 import { useDatabase } from '../context/MockDatabaseContext';
+import { useState, useEffect } from 'react';
 
 const Layout = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { logout, currentUserRole } = useDatabase();
+    const { logout } = useDatabase();
+    const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+
+    useEffect(() => {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+            try {
+                const user = JSON.parse(userStr);
+                // Map backend role 'customer' to frontend role 'client'
+                const role = user.role === 'customer' ? 'client' : user.role;
+                setCurrentUserRole(role);
+            } catch (e) {
+                console.error('Error parsing user data');
+            }
+        }
+    }, []);
+
+    const handleLogout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        logout();
+        navigate('/login');
+    };
 
     const navItems = [
         { path: '/', icon: Home, label: 'Home', roles: ['client', 'courier'] },
         { path: '/ai-support', icon: MessageSquare, label: 'AI Support', roles: ['client', 'courier'] },
         { path: '/call', icon: Phone, label: 'Call', roles: ['courier'] },
         { path: '/route', icon: Map, label: 'Route', roles: ['courier'] },
-    ].filter(item => item.roles.includes(currentUserRole || ''));
+    ].filter(item => currentUserRole && item.roles.includes(currentUserRole));
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -40,10 +63,7 @@ const Layout = () => {
                     );
                 })}
                 <button
-                    onClick={() => {
-                        logout();
-                        navigate('/login');
-                    }}
+                    onClick={handleLogout}
                     className="flex flex-col items-center p-2 rounded-lg transition-colors text-gray-500 hover:text-red-600"
                 >
                     <LogOut size={24} />

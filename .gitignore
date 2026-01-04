@@ -45,3 +45,22 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# --- Frontend (React / Vite) ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+
+# --- Backend Extras (FastAPI / Python) ---
+# Hardhat / Blockchain (since you are using Hardhat)
+artifacts/
+cache/
+typechain/
+typechain-types/
+
+# Python specific
+.pytest_cache/
+.coverage
+htmlcov/

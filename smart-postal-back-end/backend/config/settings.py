@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     
-    # Database - defaults to MySQL for development
-    DATABASE_URL: str = "mysql+pymysql://root:root@localhost:3306/delivery_system"
+    # Database - defaults to MySQL for development (XAMPP has no password by default)
+    DATABASE_URL: str = "mysql+pymysql://root@localhost:3306/delivery_system"
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 0
     
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours for development
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ENCRYPTION_KEY: str = "your-encryption-key-32-bytes-long"
     

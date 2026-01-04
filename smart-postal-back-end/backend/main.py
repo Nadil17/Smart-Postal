@@ -8,7 +8,7 @@ from loguru import logger
 from config.settings import get_settings
 from models.database import engine, Base
 from models import User, Order, VoiceTemplate, FingerprintTemplate, FaceTemplate, VerificationLog, Delivery
-from api.routes import auth, users, orders, voice, face
+from api.routes import auth, users, orders, voice, face, blockchain
 
 settings = get_settings()
 
@@ -80,6 +80,11 @@ async def health_check():
         "environment": settings.ENVIRONMENT
     }
 
+# Include Locker router
+from api.routes import lockers
+
+app.include_router(lockers.router, prefix="/api/lockers", tags=["Lockers"])
+
 # Root endpoint
 @app.get("/")
 async def root():
@@ -96,6 +101,7 @@ app.include_router(users.router)
 app.include_router(orders.router)
 app.include_router(voice.router)
 app.include_router(face.router)
+app.include_router(blockchain.router)
 
 if __name__ == "__main__":
     import uvicorn

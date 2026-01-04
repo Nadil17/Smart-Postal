@@ -1,4 +1,4 @@
-import { User, Truck } from 'lucide-react';
+import { User, Truck, Shield } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDatabase } from '../context/MockDatabaseContext';
 
@@ -6,12 +6,14 @@ const RoleSelection = () => {
     const navigate = useNavigate();
     const { setRole } = useDatabase();
 
-    const handleSelectRole = (role: 'client' | 'courier') => {
+    const handleSelectRole = (role: 'client' | 'courier' | 'admin') => {
         setRole(role);
         if (role === 'client') {
             navigate('/client/dashboard');
-        } else {
+        } else if (role === 'courier') {
             navigate('/courier/dashboard');
+        } else {
+            navigate('/admin/dashboard');
         }
     };
 
@@ -57,6 +59,19 @@ const RoleSelection = () => {
                     <div className="text-left">
                         <h2 className="font-bold text-gray-800">I am a Courier</h2>
                         <p className="text-sm text-gray-500">Manage deliveries & verify identity</p>
+                    </div>
+                </button>
+
+                <button
+                    onClick={() => handleSelectRole('admin')}
+                    className="flex items-center gap-4 p-6 bg-white rounded-2xl shadow-sm hover:shadow-md transition-all active:scale-95 border border-gray-100"
+                >
+                    <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600">
+                        <Shield size={24} />
+                    </div>
+                    <div className="text-left">
+                        <h2 className="font-bold text-gray-800">I am an Admin</h2>
+                        <p className="text-sm text-gray-500">Manage system & monitor operations</p>
                     </div>
                 </button>
             </div>
