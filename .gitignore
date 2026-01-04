@@ -45,3 +45,18 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+# Virtual Environment
+postal_env/
+ML-Routes-Prediction-Model/postal_env/
+
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Environment variables
+.env
