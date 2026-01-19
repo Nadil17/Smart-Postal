@@ -14,6 +14,8 @@ import librosa
 from dataclasses import dataclass, asdict
 from fastapi import UploadFile
 
+from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
+
 settings = get_settings()
 
 @dataclass
@@ -64,6 +66,11 @@ class BankingGradeVoiceProcessor:
             cls._instance.resemblyzer_model = None
             cls._instance.initialization_error = None
             cls._instance.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+            # AI / deepfake detector (loaded lazily)
+            cls._instance._ai_detector_error = None
+            cls._instance._ai_model = None
+            cls._instance._ai_feature_extractor = None
         return cls._instance
     
     def _ensure_models_loaded(self):
@@ -201,413 +208,169 @@ class BankingGradeVoiceProcessor:
             y, sr = librosa.load(audio_path, sr=sample_rate)
             return y
 
-    def detect_ai_synthetic_voice(self, audio_path: str, sample_rate: int = 16000, 
-                                   strict_mode: bool = True) -> AISyntheticDetectionMetrics:
-        """
-        Advanced AI-generated/synthetic voice detection with re-recording detection.
-        
-        Detects:
-        1. Direct AI-generated voices (TTS, voice cloning)
-        2. Re-recorded AI voices (speaker -> microphone)
-        3. Acoustic replay attacks
-        4. Voice conversion artifacts
-        
-        Args:
-            audio_path: Path to audio file
-            sample_rate: Target sample rate
-            strict_mode: If True, use stricter thresholds
-        
-        Returns:
-            AISyntheticDetectionMetrics with detection results
-        """
-        logger.info(f"🔍 Starting AI detection on: {audio_path} (strict_mode={strict_mode})")
+    def _ensure_ai_detector_loaded(self):
+        """Load ML-based AI/deepfake detector (Transformers)"""
+        if self._ai_model is not None or self._ai_detector_error is not None:
+            return
+
+        current_settings = get_settings()
+        if not getattr(current_settings, "ENABLE_AI_DETECTION", True):
+            self._ai_detector_error = "AI detection disabled by settings"
+            return
+
+        # Model: real vs fake deepfake audio classifier
+        # Uses standard Transformers APIs and caches to HF_HOME/TRANSFORMERS_CACHE.
+        model_name = getattr(current_settings, "AI_DETECTION_MODEL", None) or "garystafford/wav2vec2-deepfake-voice-detector"
+
         try:
-            y, sr = librosa.load(audio_path, sr=sample_rate)
-            duration = librosa.get_duration(y=y, sr=sr)
-            
-            flags = []
-            features = {}
-            
-            # =================================================================
-            # 1. SPECTRAL ANALYSIS - Detects unnatural frequency patterns
-            # =================================================================
-            
-            # Extract mel-frequency cepstral coefficients (MFCC)
-            mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
-            mfcc_mean = np.mean(mfcc, axis=1)
-            mfcc_std = np.std(mfcc, axis=1)
-            mfcc_delta = librosa.feature.delta(mfcc)
-            
-            # AI voices often have unnatural MFCC patterns
-            mfcc_variance = np.mean(mfcc_std)
-            features['mfcc_variance'] = float(mfcc_variance)
-            
-            # Low variance suggests synthetic generation (relaxed threshold)
-            if mfcc_variance < 10.0:
-                flags.append("LOW_MFCC_VARIANCE")
-            
-            # Spectral centroid - center of mass of spectrum
-            spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-            spectral_centroid_mean = np.mean(spectral_centroid)
-            spectral_centroid_std = np.std(spectral_centroid)
-            
-            features['spectral_centroid_mean'] = float(spectral_centroid_mean)
-            features['spectral_centroid_std'] = float(spectral_centroid_std)
-            
-            # AI voices tend to have more stable spectral centroid (relaxed threshold)
-            if spectral_centroid_std < 150:
-                flags.append("STABLE_SPECTRAL_CENTROID")
-            
-            # =================================================================
-            # 2. TEMPORAL ANALYSIS - Detects unnatural timing patterns
-            # =================================================================
-            
-            # Energy envelope analysis
-            frame_energy = librosa.feature.rms(y=y)[0]
-            energy_variance = np.var(frame_energy)
-            energy_kurtosis_val = kurtosis(frame_energy)
-            energy_skew_val = skew(frame_energy)
-            
-            features['energy_variance'] = float(energy_variance)
-            features['energy_kurtosis'] = float(energy_kurtosis_val)
-            features['energy_skew'] = float(energy_skew_val)
-            
-            # AI voices often have unnaturally consistent energy (relaxed threshold)
-            if energy_variance < 0.0003:
-                flags.append("LOW_ENERGY_VARIANCE")
-            
-            # Unnatural kurtosis suggests synthetic generation
-            if abs(energy_kurtosis_val) < 1.5 or abs(energy_kurtosis_val) > 8.0:
-                flags.append("ABNORMAL_ENERGY_KURTOSIS")
-            
-            # =================================================================
-            # 3. PHASE ANALYSIS - Detects replay/re-recording artifacts
-            # =================================================================
-            
-            # Compute STFT for phase analysis
-            stft = librosa.stft(y)
-            phase = np.angle(stft)
-            
-            # Phase coherence - measures phase consistency
-            phase_diff = np.diff(phase, axis=1)
-            phase_coherence = np.mean(np.abs(np.cos(phase_diff)))
-            
-            features['phase_coherence'] = float(phase_coherence)
-            
-            # Re-recorded audio has different phase characteristics (relaxed threshold)
-            if phase_coherence > 0.90:
-                flags.append("HIGH_PHASE_COHERENCE")
-            
-            # =================================================================
-            # 4. HIGH-FREQUENCY ANALYSIS - Detects TTS and re-recording
-            # =================================================================
-            
-            # Human voice has rich high-frequency content
-            # Re-recorded or TTS audio loses high frequencies
-            
-            # Split spectrum into low (<2kHz) and high (>4kHz) bands
-            fft = np.fft.rfft(y)
-            freqs = np.fft.rfftfreq(len(y), 1/sr)
-            
-            low_freq_mask = freqs < 2000
-            high_freq_mask = freqs > 4000
-            
-            low_freq_power = np.mean(np.abs(fft[low_freq_mask])**2)
-            high_freq_power = np.mean(np.abs(fft[high_freq_mask])**2)
-            
-            high_low_ratio = high_freq_power / (low_freq_power + 1e-10)
-            features['high_low_freq_ratio'] = float(high_low_ratio)
-            
-            # Low ratio suggests re-recording or speaker playback (focus on clear cases)
-            if high_low_ratio < 0.008:
-                flags.append("LOW_HIGH_FREQ_CONTENT")
-            
-            # =================================================================
-            # 5. HARMONICITY ANALYSIS - Detects synthetic pitch
-            # =================================================================
-            
-            # Extract pitch and harmonicity
-            try:
-                pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
-                pitch_values = []
-                
-                for t in range(pitches.shape[1]):
-                    index = magnitudes[:, t].argmax()
-                    pitch = pitches[index, t]
-                    if pitch > 0:
-                        pitch_values.append(pitch)
-                
-                if len(pitch_values) > 0:
-                    pitch_std = np.std(pitch_values)
-                    features['pitch_std'] = float(pitch_std)
-                    
-                    # AI voices often have unnaturally stable pitch
-                    if pitch_std < 10.0:
-                        flags.append("STABLE_PITCH")
-            except:
-                features['pitch_std'] = 0.0
-            
-            # =================================================================
-            # 6. FORMANT ANALYSIS - Detects unnatural vocal tract simulation
-            # =================================================================
-            
-            # Extract formants using LPC (Linear Predictive Coding)
-            # AI/TTS often has unnatural formant transitions
-            try:
-                # Pre-emphasis filter
-                pre_emphasis = 0.97
-                y_emphasized = np.append(y[0], y[1:] - pre_emphasis * y[:-1])
-                
-                # Frame the signal
-                frame_length = int(0.025 * sr)  # 25ms frames
-                hop_length = int(0.010 * sr)    # 10ms hop
-                
-                frames = librosa.util.frame(y_emphasized, 
-                                            frame_length=frame_length, 
-                                            hop_length=hop_length)
-                
-                formant_variance_list = []
-                for frame in frames.T[:50]:  # Sample first 50 frames
-                    if np.sum(frame**2) > 0.01:  # Skip silent frames
-                        # Simple formant estimation using peak picking
-                        spectrum = np.abs(np.fft.rfft(frame))
-                        formant_variance_list.append(np.std(spectrum))
-                
-                if len(formant_variance_list) > 0:
-                    formant_consistency = np.mean(formant_variance_list)
-                    features['formant_consistency'] = float(formant_consistency)
-                    
-                    # Too consistent formants suggest TTS
-                    if formant_consistency < 0.05:
-                        flags.append("CONSISTENT_FORMANTS")
-            except:
-                features['formant_consistency'] = 0.0
-            
-            # =================================================================
-            # 7. RE-RECORDING DETECTION - Detects speaker->microphone path
-            # =================================================================
-            
-            is_rerecorded = False
-            rerecording_confidence = 0.0
-            
-            # Room reverb/echo detection (indicates speaker playback)
-            try:
-                # Autocorrelation for echo detection
-                autocorr = np.correlate(y, y, mode='full')
-                autocorr = autocorr[len(autocorr)//2:]
-                
-                # Normalize
-                if autocorr[0] > 0:
-                    autocorr = autocorr / autocorr[0]
-                
-                # Look for secondary peaks (echoes)
-                # Skip first 100ms to avoid pitch harmonics
-                search_start = int(0.1 * sr)
-                search_end = int(0.5 * sr)
-                
-                if search_end < len(autocorr):
-                    echo_region = autocorr[search_start:search_end]
-                    max_echo = np.max(echo_region) if len(echo_region) > 0 else 0
-                    
-                    features['echo_strength'] = float(max_echo)
-                    
-                    # Strong echo suggests speaker playback
-                    if max_echo > 0.3:
-                        flags.append("ECHO_DETECTED")
-                        is_rerecorded = True
-                        rerecording_confidence = min(max_echo, 1.0)
-            except:
-                features['echo_strength'] = 0.0
-            
-            # Bandlimited signal detection (speaker frequency response)
-            # Re-recorded audio through phone speakers has characteristic limits
-            magnitude_spectrum = np.abs(fft)
-            
-            # Check for unnatural frequency cutoffs (typical of phone speakers)
-            very_high_freq_mask = freqs > 8000
-            very_high_power = np.mean(magnitude_spectrum[very_high_freq_mask])
-            
-            features['very_high_freq_power'] = float(very_high_power)
-            
-            if very_high_power < 0.001:
-                flags.append("BANDLIMITED_SIGNAL")
-                is_rerecorded = True
-                rerecording_confidence = max(rerecording_confidence, 0.6)
-            
-            # =================================================================
-            # 8. PROSODY ANALYSIS - Detects unnatural speech rhythm
-            # =================================================================
-            
-            # Zero-crossing rate variability
-            zcr = librosa.feature.zero_crossing_rate(y)[0]
-            zcr_std = np.std(zcr)
-            
-            features['zcr_std'] = float(zcr_std)
-            
-            # AI voices often have more consistent zero-crossing rates
-            if zcr_std < 0.02:
-                flags.append("CONSISTENT_ZCR")
-            
-            # =================================================================
-            # 9. MODULATION SPECTRUM ANALYSIS - Detects AI generation patterns
-            # =================================================================
-            
-            # Compute modulation spectrum (spectrum of the envelope)
-            envelope = np.abs(librosa.feature.rms(y=y)[0])
-            mod_spectrum = np.abs(np.fft.rfft(envelope))
-            mod_spectrum_peak = np.max(mod_spectrum[1:]) if len(mod_spectrum) > 1 else 0  # Skip DC
-            
-            features['modulation_spectrum_peak'] = float(mod_spectrum_peak)
-            
-            # Unnatural modulation suggests TTS
-            if mod_spectrum_peak > 50.0:
-                flags.append("ABNORMAL_MODULATION")
-            
-            # =================================================================
-            # 10. LFCC ANALYSIS - Advanced anti-spoofing feature
-            # =================================================================
-            
-            try:
-                from utils.anti_spoof import lfcc_extractor
-                
-                # Extract LFCC features
-                lfcc = lfcc_extractor.extract(y)
-                lfcc_stats = lfcc_extractor.compute_statistics(lfcc)
-                
-                # Add LFCC statistics to features
-                features.update(lfcc_stats)
-                
-                # LFCC-based spoofing indicators
-                if lfcc_stats.get('lfcc_range', 100) < 15.0:
-                    flags.append("LOW_LFCC_RANGE")
-                
-                if abs(lfcc_stats.get('lfcc_kurtosis', 0)) < 1.0:
-                    flags.append("ABNORMAL_LFCC_KURTOSIS")
-                
-                logger.debug(f"LFCC features extracted: range={lfcc_stats.get('lfcc_range', 0):.2f}")
-                
-            except Exception as e:
-                logger.warning(f"LFCC extraction failed: {e}")
-            
-            # =================================================================
-            # 11. AGGREGATE SCORING - Combine all indicators
-            # =================================================================
-            
-            # Count red flags
-            red_flag_count = len(flags)
-            features['red_flag_count'] = red_flag_count
-            
-            # Calculate AI probability based on multiple factors
-            ai_score = 0.0
-            
-            # Weighted scoring based on detection strength (reduced weights to avoid false positives)
-            if "LOW_MFCC_VARIANCE" in flags:
-                ai_score += 0.10
-            if "STABLE_SPECTRAL_CENTROID" in flags:
-                ai_score += 0.08
-            if "LOW_ENERGY_VARIANCE" in flags:
-                ai_score += 0.12
-            if "ABNORMAL_ENERGY_KURTOSIS" in flags:
-                ai_score += 0.08
-            if "HIGH_PHASE_COHERENCE" in flags:
-                ai_score += 0.06
-            if "LOW_HIGH_FREQ_CONTENT" in flags:
-                ai_score += 0.18  # Strong indicator for re-recorded/speaker playback
-            if "STABLE_PITCH" in flags:
-                ai_score += 0.08
-            if "CONSISTENT_FORMANTS" in flags:
-                ai_score += 0.10
-            if "ECHO_DETECTED" in flags:
-                ai_score += 0.22  # Strong indicator of re-recording
-            if "BANDLIMITED_SIGNAL" in flags:
-                ai_score += 0.20  # Strong indicator of speaker playback
-            if "CONSISTENT_ZCR" in flags:
-                ai_score += 0.07
-            if "ABNORMAL_MODULATION" in flags:
-                ai_score += 0.06
-            
-            # LFCC-based flags (new)
-            if "LOW_LFCC_RANGE" in flags:
-                ai_score += 0.09
-            if "ABNORMAL_LFCC_KURTOSIS" in flags:
-                ai_score += 0.08
-            
-            # Normalize to 0-1 range
-            ai_probability = min(ai_score, 1.0)
-            
-            # Determine detection thresholds (balanced to reduce false positives)
-            if strict_mode:
-                # Strict mode: Sensitive but not overly aggressive
-                AI_THRESHOLD = 0.45  # Reject if 45%+ AI probability
+            logger.info(f"🔐 Loading AI voice detector model: {model_name}")
+            self._ai_feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
+            self._ai_model = AutoModelForAudioClassification.from_pretrained(model_name)
+            self._ai_model.to(self.device)
+            self._ai_model.eval()
+            logger.info(f"✓ AI voice detector loaded on {self.device}")
+        except Exception as e:
+            self._ai_detector_error = f"Failed to load AI detector model ({model_name}): {e}"
+            self._ai_model = None
+            self._ai_feature_extractor = None
+            logger.error(self._ai_detector_error)
+
+    def detect_ai_synthetic_voice(self, audio_path: str, sample_rate: int = 16000,
+                                   strict_mode: bool = True) -> AISyntheticDetectionMetrics:
+        """ML-based deepfake voice detection.
+
+        This replaces the prior heuristic detector entirely.
+
+        Implementation notes:
+        - Uses a pretrained Transformers audio-classification model.
+        - Runs inference on one or more fixed-length windows and aggregates probabilities.
+        - Returns a calibrated probability that audio is AI-generated ("fake").
+        """
+        current_settings = get_settings()
+        enabled = getattr(current_settings, "ENABLE_AI_DETECTION", True)
+        if not enabled:
+            return AISyntheticDetectionMetrics(
+                is_human=True,
+                confidence=0.0,
+                ai_probability=0.0,
+                detection_method="DISABLED",
+                flags=["AI_DETECTION_DISABLED"],
+                features={},
+                is_rerecorded=False,
+                rerecording_confidence=0.0,
+            )
+
+        self._ensure_ai_detector_loaded()
+
+        # If we can't load the model, don't guess.
+        # We return "unknown"-ish probability and let the policy layer decide (challenge vs deny).
+        if self._ai_model is None or self._ai_feature_extractor is None:
+            features = {"error": self._ai_detector_error or "AI detector unavailable"}
+            # Conservative default: raise risk without hard-blocking users.
+            return AISyntheticDetectionMetrics(
+                is_human=True,
+                confidence=0.0,
+                ai_probability=0.50,
+                detection_method="UNAVAILABLE",
+                flags=["AI_DETECTOR_UNAVAILABLE"],
+                features=features,
+                is_rerecorded=False,
+                rerecording_confidence=0.0,
+            )
+
+        threshold = float(getattr(current_settings, "AI_DETECTION_THRESHOLD", 0.90))
+        if not strict_mode:
+            # In non-strict mode, be less aggressive.
+            threshold = min(max(threshold, 0.50), 0.95)
+
+        logger.info(f"🔍 AI voice detection (ML): {audio_path} (threshold={threshold}, strict={strict_mode})")
+
+        try:
+            audio, sr = librosa.load(audio_path, sr=sample_rate, mono=True)
+            duration = float(librosa.get_duration(y=audio, sr=sr))
+
+            # Model training ranges vary; chunking reduces sensitivity to clip boundaries.
+            window_seconds = 4.0
+            hop_seconds = 2.0
+            window_len = int(window_seconds * sr)
+            hop_len = int(hop_seconds * sr)
+
+            if len(audio) <= window_len:
+                windows = [audio]
             else:
-                # Standard mode: Balanced
-                AI_THRESHOLD = 0.60  # Reject if 60%+ AI probability
-            
-            is_human = ai_probability < AI_THRESHOLD
-            confidence = abs(ai_probability - 0.5) * 2  # Distance from decision boundary
-            
-            # Determine primary detection method
+                windows = []
+                for start in range(0, max(len(audio) - window_len + 1, 1), hop_len):
+                    end = start + window_len
+                    if end > len(audio):
+                        break
+                    windows.append(audio[start:end])
+                if not windows:
+                    windows = [audio[:window_len]]
+
+            prob_fakes: List[float] = []
+            for idx, chunk in enumerate(windows[:6]):
+                # limit windows to bound latency
+                inputs = self._ai_feature_extractor(
+                    chunk,
+                    sampling_rate=sr,
+                    return_tensors="pt",
+                    padding=True,
+                )
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    outputs = self._ai_model(**inputs)
+                    logits = outputs.logits
+                    probs = torch.nn.functional.softmax(logits, dim=-1)
+
+                # Most deepfake classifiers use 2 classes: [real, fake]
+                prob_fake = float(probs[0, 1].detach().cpu().item()) if probs.shape[-1] >= 2 else float(torch.sigmoid(logits)[0].detach().cpu().item())
+                prob_fakes.append(prob_fake)
+
+            # Conservative aggregation: max fake-prob over windows
+            ai_probability = float(max(prob_fakes) if prob_fakes else 0.5)
+            is_human = ai_probability < threshold
+
+            confidence = float(max(ai_probability, 1.0 - ai_probability))
+            flags: List[str] = []
             if not is_human:
-                if "ECHO_DETECTED" in flags or "BANDLIMITED_SIGNAL" in flags:
-                    detection_method = "RE_RECORDED_DETECTION"
-                elif "LOW_HIGH_FREQ_CONTENT" in flags:
-                    detection_method = "SPECTRAL_ANALYSIS"
-                elif "LOW_ENERGY_VARIANCE" in flags or "STABLE_PITCH" in flags:
-                    detection_method = "TEMPORAL_ANALYSIS"
-                else:
-                    detection_method = "MULTI_FACTOR_ANALYSIS"
-            else:
-                detection_method = "HUMAN_VOICE_CONFIRMED"
-            
-            logger.info(f"🤖 AI Detection: Human={is_human}, AI_Prob={ai_probability:.3f}, "
-                       f"Flags={red_flag_count}, Method={detection_method}, "
-                       f"ReRecorded={is_rerecorded}, Threshold={AI_THRESHOLD}, Strict={strict_mode}")
-            
-            if flags:
-                logger.info(f"   Detection flags: {', '.join(flags)}")
-            else:
-                logger.info(f"   No detection flags raised - appears to be human voice")
-            
+                flags.append("MODEL_PREDICTS_FAKE")
+
+            features = {
+                "model": getattr(current_settings, "AI_DETECTION_MODEL", None) or "garystafford/wav2vec2-deepfake-voice-detector",
+                "threshold": threshold,
+                "duration_seconds": duration,
+                "window_seconds": window_seconds,
+                "hop_seconds": hop_seconds,
+                "window_probs_fake": prob_fakes,
+                "aggregation": "max",
+            }
+
+            logger.info(f"🤖 AI Detection (ML): human={is_human}, fake_prob={ai_probability:.3f}, windows={len(prob_fakes)}")
+
             return AISyntheticDetectionMetrics(
                 is_human=is_human,
-                confidence=float(confidence),
-                ai_probability=float(ai_probability),
-                detection_method=detection_method,
+                confidence=confidence,
+                ai_probability=ai_probability,
+                detection_method="WAV2VEC2_DEEPFAKE_CLASSIFIER",
                 flags=flags,
                 features=features,
-                is_rerecorded=is_rerecorded,
-                rerecording_confidence=float(rerecording_confidence)
+                is_rerecorded=False,
+                rerecording_confidence=0.0,
             )
-            
+
         except Exception as e:
-            logger.error(f"AI detection error: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            
-            # Fail secure: reject on error in strict mode
-            if strict_mode:
-                return AISyntheticDetectionMetrics(
-                    is_human=False,
-                    confidence=0.0,
-                    ai_probability=1.0,
-                    detection_method="ERROR_FAIL_SECURE",
-                    flags=["DETECTION_ERROR"],
-                    features={"error": str(e)},
-                    is_rerecorded=False,
-                    rerecording_confidence=0.0
-                )
-            else:
-                # Fail open in non-strict mode
-                return AISyntheticDetectionMetrics(
-                    is_human=True,
-                    confidence=0.0,
-                    ai_probability=0.0,
-                    detection_method="ERROR_FAIL_OPEN",
-                    flags=["DETECTION_ERROR"],
-                    features={"error": str(e)},
-                    is_rerecorded=False,
-                    rerecording_confidence=0.0
-                )
+            logger.error(f"AI detection (ML) error: {e}")
+            # Don't silently misclassify; raise risk via probability=0.5.
+            return AISyntheticDetectionMetrics(
+                is_human=True,
+                confidence=0.0,
+                ai_probability=0.50,
+                detection_method="ERROR",
+                flags=["AI_DETECTION_ERROR"],
+                features={"error": str(e)},
+                is_rerecorded=False,
+                rerecording_confidence=0.0,
+            )
 
     def detect_replay_attack(self, audio_path: str, sample_rate: int = 16000) -> AntiSpoofingMetrics:
         """

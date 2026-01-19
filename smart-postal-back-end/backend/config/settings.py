@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # AI Detection
     AI_DETECTION_THRESHOLD: float = 0.90
     ENABLE_AI_DETECTION: bool = True
+    AI_DETECTION_MODEL: str = "garystafford/wav2vec2-deepfake-voice-detector"
     
     # File Storage
     AUDIO_STORAGE_PATH: str = "../storage/audio_samples"

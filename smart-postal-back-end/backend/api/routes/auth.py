@@ -7,6 +7,7 @@ from models.user import User
 from api.schemas import UserCreate, UserLogin, UserResponse, Token, TokenData, PasswordChange
 from utils.security import hash_password, verify_password, create_access_token, decode_token
 from config.settings import get_settings
+from api.middleware.auth import get_current_user as get_current_user_from_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
@@ -68,36 +69,9 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     }
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user(db: Session = Depends(get_db), token: str = None):
-    """Get current user information"""
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
-        )
-    
-    try:
-        payload = decode_token(token)
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
-            )
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
-    
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    return user
+async def read_me(current_user: User = Depends(get_current_user_from_token)):
+    """Get current user information (Authorization: Bearer <token>)"""
+    return current_user
 
 @router.post("/refresh")
 async def refresh_token(token: str):
