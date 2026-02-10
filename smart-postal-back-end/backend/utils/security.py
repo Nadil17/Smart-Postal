@@ -1,15 +1,12 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from cryptography.fernet import Fernet
 from config.settings import get_settings
 import base64
 
 settings = get_settings()
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Encryption for biometric data
 def get_cipher():
@@ -19,18 +16,17 @@ def get_cipher():
         key = base64.urlsafe_b64encode(key[:32].ljust(32, b'0'))
     return Fernet(key)
 
-def _truncate_password(password: str) -> str:
+def _truncate_password(password: str) -> bytes:
     """Truncate password to 72 bytes for bcrypt compatibility"""
-    # bcrypt has a max password length of 72 bytes
-    return password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    return password.encode('utf-8')[:72]
 
 def hash_password(password: str) -> str:
     truncated = _truncate_password(password)
-    return pwd_context.hash(truncated)
+    return bcrypt.hashpw(truncated, bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     truncated = _truncate_password(plain_password)
-    return pwd_context.verify(truncated, hashed_password)
+    return bcrypt.checkpw(truncated, hashed_password.encode('utf-8'))
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()

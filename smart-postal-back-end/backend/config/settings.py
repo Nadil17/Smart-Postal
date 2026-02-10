@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     AI_DETECTION_THRESHOLD: float = 0.90
     ENABLE_AI_DETECTION: bool = True
     AI_DETECTION_MODEL: str = "garystafford/wav2vec2-deepfake-voice-detector"
+
+    # Heuristic TTS / synthetic speech detection (language-agnostic)
+    # Helps catch Sinhala TTS (e.g., Google Translate) where ML classifiers may under-generalize.
+    ENABLE_TTS_HEURISTICS: bool = True
     
     # File Storage
     AUDIO_STORAGE_PATH: str = "../storage/audio_samples"
