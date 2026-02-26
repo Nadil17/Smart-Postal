@@ -1,9 +1,9 @@
 import { Text, View, StyleSheet, Animated, Dimensions } from "react-native";
-import { LinearGradient } from 'expo-linear-gradient';
+import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef } from "react";
-import { BlurView } from 'expo-blur';
+import { BlurView } from "expo-blur";
 
-const { width, height } = Dimensions.get('window');
+const { width, height } = Dimensions.get("window");
 
 export default function Index() {
   const floatAnim1 = useRef(new Animated.Value(0)).current;
@@ -29,7 +29,10 @@ export default function Index() {
     ]).start();
 
     // Continuous floating animations for background orbs
-    const createFloatingAnimation = (animValue: Animated.Value, duration: number) => {
+    const createFloatingAnimation = (
+      animValue: Animated.Value,
+      duration: number,
+    ) => {
       return Animated.loop(
         Animated.sequence([
           Animated.timing(animValue, {
@@ -42,7 +45,7 @@ export default function Index() {
             duration: duration,
             useNativeDriver: true,
           }),
-        ])
+        ]),
       );
     };
 
@@ -70,7 +73,7 @@ export default function Index() {
     <View style={styles.container}>
       {/* Animated gradient background */}
       <LinearGradient
-        colors={['#0f0c29', '#302b63', '#24243e']}
+        colors={["#0f0c29", "#302b63", "#24243e"]}
         style={StyleSheet.absoluteFillObject}
       />
 
@@ -83,7 +86,7 @@ export default function Index() {
         ]}
       >
         <LinearGradient
-          colors={['#ff6b9d', '#c06c84']}
+          colors={["#ff6b9d", "#c06c84"]}
           style={styles.orbGradient}
         />
       </Animated.View>
@@ -96,7 +99,7 @@ export default function Index() {
         ]}
       >
         <LinearGradient
-          colors={['#4facfe', '#00f2fe']}
+          colors={["#4facfe", "#00f2fe"]}
           style={styles.orbGradient}
         />
       </Animated.View>
@@ -109,7 +112,7 @@ export default function Index() {
         ]}
       >
         <LinearGradient
-          colors={['#43e97b', '#38f9d7']}
+          colors={["#43e97b", "#38f9d7"]}
           style={styles.orbGradient}
         />
       </Animated.View>
@@ -128,21 +131,19 @@ export default function Index() {
           <View style={styles.cardContent}>
             {/* Decorative corner accent */}
             <View style={styles.cornerAccent} />
-            
+
             <Text style={styles.emoji}>✨</Text>
-            
-            <Text style={styles.title}>Welcome</Text>
-            
-            <Text style={styles.subtitle}>
-              Your canvas awaits
-            </Text>
-            
+
+            <Text style={styles.title}>xxx</Text>
+
+            <Text style={styles.subtitle}>Your canvas awaits</Text>
+
             <View style={styles.divider} />
-            
+
             <Text style={styles.bodyText}>
               Edit app/index.tsx to bring your vision to life
             </Text>
-            
+
             {/* Animated pulse indicator */}
             <View style={styles.pulseContainer}>
               <View style={styles.pulseRing} />
@@ -166,27 +167,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   orb: {
-    position: 'absolute',
+    position: "absolute",
     borderRadius: 200,
     opacity: 0.3,
   },
   orb1: {
     width: 280,
     height: 280,
-    top: '10%',
+    top: "10%",
     left: -100,
   },
   orb2: {
     width: 200,
     height: 200,
-    top: '60%',
+    top: "60%",
     right: -50,
   },
   orb3: {
     width: 240,
     height: 240,
-    bottom: '15%',
-    left: '50%',
+    bottom: "15%",
+    left: "50%",
   },
   orbGradient: {
     flex: 1,
@@ -195,10 +196,10 @@ const styles = StyleSheet.create({
   glassCard: {
     width: width * 0.85,
     borderRadius: 32,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    shadowColor: '#000',
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.5,
     shadowRadius: 40,
@@ -206,20 +207,20 @@ const styles = StyleSheet.create({
   },
   blurContainer: {
     padding: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
   },
   cardContent: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   cornerAccent: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     right: 0,
     width: 60,
     height: 60,
     borderTopRightRadius: 32,
     borderBottomLeftRadius: 60,
-    backgroundColor: 'rgba(67, 233, 123, 0.2)',
+    backgroundColor: "rgba(67, 233, 123, 0.2)",
   },
   emoji: {
     fontSize: 56,
@@ -227,69 +228,69 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 48,
-    fontWeight: '800',
-    color: '#ffffff',
+    fontWeight: "800",
+    color: "#ffffff",
     letterSpacing: -1,
     marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowColor: "rgba(0, 0, 0, 0.3)",
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
   },
   subtitle: {
     fontSize: 18,
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontWeight: '500',
+    color: "rgba(255, 255, 255, 0.7)",
+    fontWeight: "500",
     letterSpacing: 2,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     marginBottom: 24,
   },
   divider: {
     width: 60,
     height: 3,
-    backgroundColor: 'rgba(67, 233, 123, 0.6)',
+    backgroundColor: "rgba(67, 233, 123, 0.6)",
     borderRadius: 2,
     marginBottom: 24,
   },
   bodyText: {
     fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.6)',
-    textAlign: 'center',
+    color: "rgba(255, 255, 255, 0.6)",
+    textAlign: "center",
     lineHeight: 22,
     maxWidth: 280,
     marginBottom: 32,
   },
   pulseContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     width: 50,
     height: 50,
   },
   pulseRing: {
-    position: 'absolute',
+    position: "absolute",
     width: 50,
     height: 50,
     borderRadius: 25,
     borderWidth: 2,
-    borderColor: 'rgba(67, 233, 123, 0.4)',
+    borderColor: "rgba(67, 233, 123, 0.4)",
   },
   pulseDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#43e97b',
+    backgroundColor: "#43e97b",
   },
   ambientGlow: {
-    position: 'absolute',
+    position: "absolute",
     width: width,
     height: 200,
     opacity: 0.1,
   },
   glowTop: {
     top: 0,
-    backgroundColor: '#4facfe',
+    backgroundColor: "#4facfe",
   },
   glowBottom: {
     bottom: 0,
-    backgroundColor: '#ff6b9d',
+    backgroundColor: "#ff6b9d",
   },
 });
