@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Postal Route Optimizer",
+    "slug": "postal-route-optimizer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1e40af"
+      },
+      "package": "com.postal.routeoptimizer"
+    }
+  }
+}
