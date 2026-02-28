@@ -1,62 +1,89 @@
 // screens/RoutesScreen.jsx
+// ─────────────────────────────────────────────────────────────
+// Displays the most optimized delivery path based on:
+//   • Weather conditions
+//   • Traffic conditions
+//   • Mail urgency priority
+// ─────────────────────────────────────────────────────────────
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
   Alert, ActivityIndicator, Animated,
 } from 'react-native';
 import MapView, { Marker, Polyline, Callout } from 'react-native-maps';
-import { changeConditions, optimizeRoute } from '../utils/api';
+import { changeConditions } from '../utils/api';
 
 const DEFAULT_REGION = {
   latitude: 6.9271, longitude: 79.8612,
   latitudeDelta: 0.08, longitudeDelta: 0.08,
 };
-const CHECK_INTERVAL = 10; // seconds
+const DEPOT = { latitude: 6.9271, longitude: 79.8612 };
+const CHECK_INTERVAL = 10;
 
-const WEATHER_STATES = ['clear', 'light_rain', 'heavy_rain'];
-const TRAFFIC_STATES = ['low', 'moderate', 'high'];
+const WEATHER_ICON  = { clear: '☀️', light_rain: '🌦️', heavy_rain: '🌧️', flooding: '⛈️' };
+const TRAFFIC_ICON  = { low: '🟢', moderate: '🟡', high: '🔴', severe: '🔴' };
+const WEATHER_SCORE = { clear: 100, light_rain: 75, heavy_rain: 45, flooding: 20 };
+const TRAFFIC_SCORE = { low: 100, moderate: 70, high: 40, severe: 15 };
+const SEVERITY_COLOR = { MINIMAL:'#10b981', LOW:'#3b82f6', MEDIUM:'#f59e0b', HIGH:'#f97316', CRITICAL:'#ef4444' };
 
 export default function RoutesScreen({ route, navigation }) {
-  const { allRoutes, deliveries, sessionId, conditions: initConditions } = route.params || {};
+  const { allRoutes, deliveries = [], sessionId, conditions: initCond } = route.params || {};
 
-  const [selectedMethod, setSelectedMethod] = useState(allRoutes?.best_method || 'q_learning');
-  const [autoMonitor, setAutoMonitor] = useState(false);
-  const [countdown, setCountdown] = useState(CHECK_INTERVAL);
-  const [currentConditions, setCurrentConditions] = useState(initConditions || { weather: 'clear', traffic: 'moderate' });
-  const [prevConditions, setPrevConditions] = useState(null);
-  const [rerouteAlert, setRerouteAlert] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [conditions, setConditions]       = useState(initCond || { weather:'clear', traffic:'moderate' });
+  const [autoMonitor, setAutoMonitor]     = useState(false);
+  const [countdown, setCountdown]         = useState(CHECK_INTERVAL);
+  const [prevCond, setPrevCond]           = useState(null);
+  const [rerouteAlert, setRerouteAlert]   = useState(null);
+  const [loading, setLoading]             = useState(false);
+  const [routeOrder, setRouteOrder]       = useState(null); // live optimized order
 
   const monitorRef = useRef(null);
   const countRef   = useRef(null);
   const fadeAnim   = useRef(new Animated.Value(0)).current;
 
-  const bestResult = allRoutes?.results?.[selectedMethod];
-  const depotCoord = { latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude };
+  // ── Compute best route result ──────────────────────────
+  const bestResult = allRoutes?.results?.[allRoutes?.best_method];
 
-  // ── Route path for polyline ────────────────────────────
-  const routeCoords =
-    bestResult?.deliveries?.map((d) => ({
-      latitude: d.latitude,
-      longitude: d.longitude,
-    })) || [];
+  // Build ordered deliveries from best result
+  const orderedDeliveries = React.useMemo(() => {
+    const src = routeOrder || bestResult?.deliveries;
+    if (!src) return deliveries;
+    return src.filter(d => d.id !== undefined && d.latitude);
+  }, [routeOrder, bestResult, deliveries]);
 
-  // ── Map region to fit all markers ──────────────────────
+  // Route polyline
+  const routeCoords = orderedDeliveries.map(d => ({
+    latitude: d.latitude, longitude: d.longitude,
+  }));
+
+  // Map region
   const region = React.useMemo(() => {
-    if (!deliveries || deliveries.length === 0) return DEFAULT_REGION;
-    const lats = deliveries.map((d) => d.latitude);
-    const lngs = deliveries.map((d) => d.longitude);
-    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    if (!deliveries.length) return DEFAULT_REGION;
+    const lats = deliveries.map(d => d.latitude);
+    const lngs = deliveries.map(d => d.longitude);
     return {
-      latitude: (minLat + maxLat) / 2,
-      longitude: (minLng + maxLng) / 2,
-      latitudeDelta: (maxLat - minLat) * 1.4 + 0.02,
-      longitudeDelta: (maxLng - minLng) * 1.4 + 0.02,
+      latitude:  (Math.min(...lats) + Math.max(...lats)) / 2,
+      longitude: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+      latitudeDelta:  (Math.max(...lats) - Math.min(...lats)) * 1.5 + 0.03,
+      longitudeDelta: (Math.max(...lngs) - Math.min(...lngs)) * 1.5 + 0.03,
     };
   }, [deliveries]);
 
-  // ── Auto-monitoring logic ─────────────────────────────
+  // ── Optimization score (0-100) ─────────────────────────
+  const urgentCount   = deliveries.filter(d => d.priority === 'urgent').length;
+  const urgencyScore  = urgentCount > 0
+    ? Math.round((bestResult?.urgent_on_time / urgentCount) * 100) || 0
+    : 100;
+  const weatherScore  = WEATHER_SCORE[conditions.weather] || 75;
+  const trafficScore  = TRAFFIC_SCORE[conditions.traffic] || 70;
+  const overallScore  = Math.round((urgencyScore * 0.4) + (weatherScore * 0.3) + (trafficScore * 0.3));
+
+  const scoreColor = overallScore >= 80 ? '#10b981'
+    : overallScore >= 60 ? '#f59e0b'
+    : '#ef4444';
+
+  // ── Auto-monitoring ────────────────────────────────────
   useEffect(() => {
     if (!autoMonitor) {
       clearInterval(monitorRef.current);
@@ -65,223 +92,228 @@ export default function RoutesScreen({ route, navigation }) {
       return;
     }
 
-    const checkAndReroute = async () => {
-      const weathers = WEATHER_STATES;
-      const traffics = TRAFFIC_STATES;
+    const WEATHERS = ['clear','light_rain','heavy_rain'];
+    const TRAFFICS = ['low','moderate','high'];
+
+    const check = async () => {
       const newCond = {
-        weather: weathers[Math.floor(Math.random() * weathers.length)],
-        traffic: traffics[Math.floor(Math.random() * traffics.length)],
+        weather: WEATHERS[Math.floor(Math.random() * WEATHERS.length)],
+        traffic: TRAFFICS[Math.floor(Math.random() * TRAFFICS.length)],
       };
-      setCurrentConditions(newCond);
-
-      if (prevConditions &&
-          (newCond.weather !== prevConditions.weather ||
-           newCond.traffic !== prevConditions.traffic)) {
-        await performReroute(prevConditions, newCond);
+      setConditions(newCond);
+      if (prevCond && (newCond.weather !== prevCond.weather || newCond.traffic !== prevCond.traffic)) {
+        await performReroute(prevCond, newCond);
       }
-      setPrevConditions(newCond);
+      setPrevCond(newCond);
     };
 
-    checkAndReroute();
-    monitorRef.current = setInterval(checkAndReroute, CHECK_INTERVAL * 1000);
-    countRef.current = setInterval(() => setCountdown((c) => (c <= 1 ? CHECK_INTERVAL : c - 1)), 1000);
-
-    return () => {
-      clearInterval(monitorRef.current);
-      clearInterval(countRef.current);
-    };
+    check();
+    monitorRef.current = setInterval(check, CHECK_INTERVAL * 1000);
+    countRef.current   = setInterval(() => setCountdown(c => c <= 1 ? CHECK_INTERVAL : c - 1), 1000);
+    return () => { clearInterval(monitorRef.current); clearInterval(countRef.current); };
   }, [autoMonitor]);
 
   const performReroute = async (oldCond, newCond) => {
     setLoading(true);
     try {
       const result = await changeConditions({
-        zone_id: 1,
-        session_id: sessionId,
-        deliveries: deliveries.map((d) => ({
-          address: d.address,
-          latitude: d.latitude,
-          longitude: d.longitude,
+        zone_id: 1, session_id: sessionId,
+        deliveries: deliveries.map(d => ({
+          address: d.address, latitude: d.latitude, longitude: d.longitude,
           mail_type: d.mail_type || 'Regular Letter',
           priority: d.priority || 'regular',
           parcels: d.parcels || 1,
           urgent: d.urgent || (d.priority === 'urgent' ? 1 : 0),
         })),
-        original_traffic: oldCond.traffic,
-        original_weather: oldCond.weather,
-        new_traffic: newCond.traffic,
-        new_weather: newCond.weather,
+        original_traffic: oldCond.traffic, original_weather: oldCond.weather,
+        new_traffic: newCond.traffic,       new_weather: newCond.weather,
       });
 
       const pct = Math.abs(result.impact_analysis.time_change_pct);
       if (pct > 10) {
+        setRouteOrder(result.new_route?.deliveries);
         setRerouteAlert({ ...result, timestamp: new Date() });
-        // Fade in alert
-        Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+        Animated.timing(fadeAnim, { toValue:1, duration:400, useNativeDriver:true }).start();
         setTimeout(() => {
-          Animated.timing(fadeAnim, { toValue: 0, duration: 400, useNativeDriver: true }).start(() =>
-            setRerouteAlert(null)
-          );
+          Animated.timing(fadeAnim, { toValue:0, duration:400, useNativeDriver:true }).start(() => setRerouteAlert(null));
         }, 10000);
-
         navigation.navigate('AutoRerouting', {
-          originalRoute: result.original_route,
-          newRoute: result.new_route,
+          originalRoute: result.original_route, newRoute: result.new_route,
           impactAnalysis: result.impact_analysis,
-          oldConditions: oldCond,
-          newConditions: newCond,
-          deliveries,
-          sessionId,
+          oldConditions: oldCond, newConditions: newCond,
+          deliveries, sessionId,
         });
       }
-    } catch (e) {
-      console.warn('Rerouting failed:', e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.warn('Reroute failed:', e.message); }
+    finally { setLoading(false); }
   };
 
-  const severityColor = (s) =>
-    ({ MINIMAL: '#10b981', LOW: '#3b82f6', MEDIUM: '#f59e0b', HIGH: '#f97316', CRITICAL: '#ef4444' }[s] || '#f59e0b');
-
-  const methodLabels = {
-    nearest_neighbor: 'Baseline (NN)',
-    urgent_priority: 'Urgent Priority',
-    '2opt': '2-Opt Search',
-    q_learning: 'Q-Learning ⭐',
-  };
+  // ── Route color based on conditions ───────────────────
+  const routeColor = conditions.weather === 'heavy_rain' || conditions.traffic === 'high'
+    ? '#f97316'
+    : overallScore >= 75 ? '#10b981' : '#f59e0b';
 
   return (
     <View style={styles.container}>
-      {/* Map */}
+
+      {/* ── MAP ─────────────────────────────────────────── */}
       <MapView style={styles.map} initialRegion={region}>
+
         {/* Depot */}
-        <Marker coordinate={depotCoord} title="Postal Depot" pinColor="green">
-          <View style={styles.depotMarker}>
-            <Text style={styles.depotIcon}>🏢</Text>
-          </View>
+        <Marker coordinate={DEPOT} title="📮 Postal Depot (Start/End)">
+          <View style={styles.depotMarker}><Text style={styles.depotIcon}>🏢</Text></View>
         </Marker>
 
-        {/* Delivery stops */}
-        {deliveries?.map((d, i) => (
-          <Marker
-            key={d.id || i}
-            coordinate={{ latitude: d.latitude, longitude: d.longitude }}
-            pinColor={d.priority === 'urgent' ? '#ef4444' : '#3b82f6'}
-          >
-            <View style={[styles.stopMarker, d.priority === 'urgent' ? styles.urgentMarker : styles.regularMarker]}>
-              <Text style={styles.stopNum}>{i + 1}</Text>
-            </View>
-            <Callout>
-              <View style={styles.callout}>
-                <Text style={styles.calloutTitle}>{d.address}</Text>
-                <Text style={styles.calloutSub}>{d.mail_type}</Text>
-                <Text style={[styles.calloutPriority, { color: d.priority === 'urgent' ? '#ef4444' : '#10b981' }]}>
-                  {d.priority?.toUpperCase()}
-                </Text>
+        {/* Delivery stops — ordered by optimization */}
+        {orderedDeliveries.map((d, i) => {
+          const isUrgent = d.priority === 'urgent';
+          return (
+            <Marker key={i} coordinate={{ latitude: d.latitude, longitude: d.longitude }}>
+              <View style={[styles.stopMarker, isUrgent ? styles.urgentM : styles.regularM]}>
+                <Text style={styles.stopNum}>{i + 1}</Text>
               </View>
-            </Callout>
-          </Marker>
-        ))}
+              <Callout>
+                <View style={styles.callout}>
+                  <Text style={styles.calloutSeq}>Stop #{i + 1}</Text>
+                  <Text style={styles.calloutAddr}>{d.address}</Text>
+                  <Text style={styles.calloutType}>{d.mail_type || 'Regular Letter'}</Text>
+                  <View style={[styles.calloutBadge, { backgroundColor: isUrgent ? '#fee2e2' : '#dcfce7' }]}>
+                    <Text style={[styles.calloutPriority, { color: isUrgent ? '#ef4444' : '#10b981' }]}>
+                      {isUrgent ? '🚨 URGENT' : '✅ REGULAR'}
+                    </Text>
+                  </View>
+                </View>
+              </Callout>
+            </Marker>
+          );
+        })}
 
-        {/* Route line */}
+        {/* Optimized route polyline */}
         {routeCoords.length > 1 && (
           <Polyline
-            coordinates={routeCoords}
-            strokeColor={selectedMethod === 'q_learning' ? '#10b981' : '#3b82f6'}
-            strokeWidth={4}
-            lineDashPattern={selectedMethod === 'nearest_neighbor' ? [10, 5] : undefined}
+            coordinates={[DEPOT, ...routeCoords, DEPOT]}
+            strokeColor={routeColor}
+            strokeWidth={5}
           />
         )}
+
+        {/* Urgent stops highlighted with outer ring */}
+        {orderedDeliveries.filter(d => d.priority === 'urgent').map((d, i) => (
+          <Marker key={`urg-${i}`} coordinate={{ latitude: d.latitude, longitude: d.longitude }} anchor={{ x:0.5, y:0.5 }}>
+            <View style={styles.urgentRing} />
+          </Marker>
+        ))}
       </MapView>
 
-      {/* Panel */}
-      <View style={styles.panel}>
-        {/* Method selector */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.methodScroll}>
-          {Object.entries(methodLabels).map(([key, label]) => {
-            const res = allRoutes?.results?.[key];
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[styles.methodBtn, selectedMethod === key && styles.methodBtnActive]}
-                onPress={() => setSelectedMethod(key)}
-              >
-                <Text style={[styles.methodBtnLabel, selectedMethod === key && styles.methodBtnLabelActive]}>
-                  {label}
-                </Text>
-                {res && (
-                  <Text style={styles.methodBtnDist}>{res.total_distance_km} km</Text>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+      {/* ── OPTIMIZATION SCORE BADGE ────────────────────── */}
+      <View style={[styles.scoreBadge, { backgroundColor: scoreColor }]}>
+        <Text style={styles.scoreValue}>{overallScore}</Text>
+        <Text style={styles.scoreLabel}>OPT{'\n'}SCORE</Text>
+      </View>
 
-        {/* Stats row */}
-        {bestResult && (
-          <View style={styles.statsRow}>
-            <StatBox icon="📏" label="Distance" value={`${bestResult.total_distance_km} km`} />
-            <StatBox icon="⏱️" label="Est. Time" value={`${(bestResult.total_time_hours * 60).toFixed(0)} min`} />
-            <StatBox icon="🚨" label="Urgent ✓" value={`${bestResult.urgent_on_time}`} color="#ef4444" />
-            <StatBox icon="🌤" label="Weather" value={currentConditions.weather} />
-          </View>
-        )}
+      {/* ── BOTTOM PANEL ────────────────────────────────── */}
+      <View style={styles.panel}>
+
+        {/* Optimization title */}
+        <View style={styles.titleRow}>
+          <Text style={styles.panelTitle}>🏆 Optimized Route — {allRoutes?.best_method?.replace('_',' ').toUpperCase()}</Text>
+        </View>
+
+        {/* 3 Factor bars */}
+        <View style={styles.factorsRow}>
+          <FactorBar
+            icon={WEATHER_ICON[conditions.weather] || '🌤️'}
+            label="Weather"
+            value={conditions.weather.replace('_',' ')}
+            score={weatherScore}
+            color={weatherScore >= 75 ? '#10b981' : weatherScore >= 50 ? '#f59e0b' : '#ef4444'}
+          />
+          <FactorBar
+            icon={TRAFFIC_ICON[conditions.traffic] || '🟡'}
+            label="Traffic"
+            value={conditions.traffic}
+            score={trafficScore}
+            color={trafficScore >= 75 ? '#10b981' : trafficScore >= 50 ? '#f59e0b' : '#ef4444'}
+          />
+          <FactorBar
+            icon="🚨"
+            label="Urgency"
+            value={`${urgentCount} urgent`}
+            score={urgencyScore}
+            color={urgencyScore >= 80 ? '#10b981' : '#f59e0b'}
+          />
+        </View>
+
+        {/* Route stats */}
+        <View style={styles.statsRow}>
+          <StatBox icon="📏" label="Distance"  value={`${bestResult?.total_distance_km ?? '--'} km`} />
+          <StatBox icon="⏱️" label="Est. Time"  value={`${bestResult ? (bestResult.total_time_hours * 60).toFixed(0) : '--'} min`} />
+          <StatBox icon="📦" label="Total Stops" value={deliveries.length} />
+          <StatBox icon="🚨" label="Urgent"     value={urgentCount} color="#ef4444" />
+        </View>
+
+        {/* Optimization explanation */}
+        <View style={[styles.explainBox, { borderLeftColor: scoreColor }]}>
+          <Text style={styles.explainTitle}>🧠 Why this route?</Text>
+          <Text style={styles.explainText}>
+            {urgentCount > 0
+              ? `• ${urgentCount} urgent item${urgentCount > 1 ? 's' : ''} prioritized first in sequence\n`
+              : '• No urgent items — pure distance optimization\n'}
+            {`• ${conditions.weather.replace('_',' ')} weather → ${weatherScore}% efficiency\n`}
+            {`• ${conditions.traffic} traffic → ${trafficScore}% road speed\n`}
+            {`• Best algorithm: ${allRoutes?.best_method?.replace(/_/g,' ')} selected from 4 methods`}
+          </Text>
+        </View>
 
         {/* Improvement vs baseline */}
-        {allRoutes && (
-          <View style={styles.improvementRow}>
-            {(() => {
-              const base = allRoutes.results.nearest_neighbor;
-              const opt  = allRoutes.results[allRoutes.best_method];
-              const saved = (base.total_distance_km - opt.total_distance_km).toFixed(2);
-              const pct   = ((saved / base.total_distance_km) * 100).toFixed(1);
-              return (
-                <Text style={styles.improvementText}>
-                  💚  Best ({allRoutes.best_method}): saves {saved} km ({pct}%) vs baseline
-                </Text>
-              );
-            })()}
-          </View>
-        )}
+        {allRoutes && (() => {
+          const base = allRoutes.results?.nearest_neighbor;
+          const opt  = allRoutes.results?.[allRoutes.best_method];
+          if (!base || !opt) return null;
+          const saved = (base.total_distance_km - opt.total_distance_km).toFixed(2);
+          const pct   = ((saved / base.total_distance_km) * 100).toFixed(1);
+          return (
+            <View style={styles.improvementBox}>
+              <Text style={styles.improvementText}>
+                💚 Saves {saved} km ({pct}%) vs unoptimized baseline
+              </Text>
+            </View>
+          );
+        })()}
 
-        {/* Control row */}
-        <View style={styles.controlRow}>
+        {/* Action buttons */}
+        <View style={styles.btnRow}>
           <TouchableOpacity
             style={[styles.monitorBtn, autoMonitor && styles.monitorBtnActive]}
-            onPress={() => { setAutoMonitor((v) => !v); setPrevConditions(null); }}
+            onPress={() => { setAutoMonitor(v => !v); setPrevCond(null); }}
           >
             {autoMonitor ? (
               <View style={styles.row}>
                 <ActivityIndicator color="#fff" size="small" />
-                <Text style={styles.monitorBtnText}>  LIVE ({countdown}s)</Text>
+                <Text style={styles.btnText}>  LIVE ({countdown}s)</Text>
               </View>
             ) : (
-              <Text style={styles.monitorBtnText}>▶  Start Auto-Monitor</Text>
+              <Text style={styles.btnText}>📡  Auto-Monitor</Text>
             )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.relocationBtn}
-            onPress={() =>
-              navigation.navigate('Relocation', {
-                deliveries, allRoutes, sessionId,
-              })
-            }
+            style={styles.relocBtn}
+            onPress={() => navigation.navigate('Relocation', { deliveries, allRoutes, sessionId })}
           >
-            <Text style={styles.relocationBtnText}>📍 Relocate</Text>
+            <Text style={styles.btnText}>📍  Relocate</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Rerouting Alert Overlay */}
+      {/* ── REROUTING ALERT ─────────────────────────────── */}
       {rerouteAlert && (
         <Animated.View style={[styles.alertOverlay, { opacity: fadeAnim }]}>
-          <View style={[styles.alertBox, { borderColor: severityColor(rerouteAlert.impact_analysis?.severity) }]}>
-            <Text style={styles.alertTitle}>🚨 Auto-Rerouting Applied!</Text>
+          <View style={[styles.alertBox, { borderColor: SEVERITY_COLOR[rerouteAlert.impact_analysis?.severity] || '#f59e0b' }]}>
+            <Text style={styles.alertTitle}>🚨 Route Updated!</Text>
             <Text style={styles.alertSub}>
-              Time impact: {rerouteAlert.impact_analysis?.time_change_minutes} min |{' '}
-              Severity: {rerouteAlert.impact_analysis?.severity}
+              Conditions changed → new optimized path applied{'\n'}
+              Impact: {rerouteAlert.impact_analysis?.time_change_minutes} min | {rerouteAlert.impact_analysis?.severity}
             </Text>
             <TouchableOpacity onPress={() => setRerouteAlert(null)}>
               <Text style={styles.alertClose}>✕ Dismiss</Text>
@@ -289,9 +321,30 @@ export default function RoutesScreen({ route, navigation }) {
           </View>
         </Animated.View>
       )}
+
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator color="#fff" size="large" />
+          <Text style={styles.loadingText}>Re-optimizing route…</Text>
+        </View>
+      )}
     </View>
   );
 }
+
+// ── Sub-components ─────────────────────────────────────────
+
+const FactorBar = ({ icon, label, value, score, color }) => (
+  <View style={styles.factorCard}>
+    <Text style={styles.factorIcon}>{icon}</Text>
+    <Text style={styles.factorLabel}>{label}</Text>
+    <Text style={styles.factorValue} numberOfLines={1}>{value}</Text>
+    <View style={styles.barBg}>
+      <View style={[styles.barFill, { width: `${score}%`, backgroundColor: color }]} />
+    </View>
+    <Text style={[styles.factorScore, { color }]}>{score}%</Text>
+  </View>
+);
 
 const StatBox = ({ icon, label, value, color = '#1e293b' }) => (
   <View style={styles.statBox}>
@@ -304,60 +357,87 @@ const StatBox = ({ icon, label, value, color = '#1e293b' }) => (
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
-  depotMarker: { backgroundColor: '#10b981', borderRadius: 20, padding: 6, borderWidth: 2, borderColor: '#fff' },
-  depotIcon: { fontSize: 18 },
-  stopMarker: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
-  urgentMarker: { backgroundColor: '#ef4444' },
-  regularMarker: { backgroundColor: '#3b82f6' },
-  stopNum: { color: '#fff', fontWeight: '800', fontSize: 12 },
-  callout: { width: 160, padding: 8 },
-  calloutTitle: { fontSize: 13, fontWeight: '700', color: '#1e293b' },
-  calloutSub: { fontSize: 11, color: '#64748b', marginTop: 2 },
-  calloutPriority: { fontSize: 11, fontWeight: '700', marginTop: 2 },
 
-  panel: {
-    backgroundColor: '#fff',
-    paddingTop: 8,
-    paddingBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    elevation: 8,
+  // Markers
+  depotMarker: { backgroundColor:'#10b981', borderRadius:20, padding:7, borderWidth:2.5, borderColor:'#fff',
+    shadowColor:'#000', shadowOpacity:0.3, shadowRadius:4, elevation:5 },
+  depotIcon: { fontSize:18 },
+  stopMarker: { width:32, height:32, borderRadius:16, justifyContent:'center', alignItems:'center', borderWidth:2.5, borderColor:'#fff',
+    shadowColor:'#000', shadowOpacity:0.3, shadowRadius:3, elevation:4 },
+  urgentM: { backgroundColor:'#ef4444' },
+  regularM: { backgroundColor:'#3b82f6' },
+  stopNum: { color:'#fff', fontWeight:'800', fontSize:13 },
+  urgentRing: { width:46, height:46, borderRadius:23, borderWidth:3, borderColor:'#ef4444', opacity:0.4 },
+
+  // Callout
+  callout: { width:180, padding:10 },
+  calloutSeq: { fontSize:11, color:'#9ca3af', fontWeight:'600' },
+  calloutAddr: { fontSize:13, fontWeight:'700', color:'#1e293b', marginTop:2 },
+  calloutType: { fontSize:11, color:'#64748b', marginTop:2 },
+  calloutBadge: { borderRadius:6, paddingHorizontal:6, paddingVertical:3, marginTop:4, alignSelf:'flex-start' },
+  calloutPriority: { fontSize:11, fontWeight:'700' },
+
+  // Score badge
+  scoreBadge: {
+    position:'absolute', top:12, right:12,
+    borderRadius:14, padding:10, alignItems:'center',
+    shadowColor:'#000', shadowOpacity:0.3, shadowRadius:6, elevation:8,
+    minWidth:60,
   },
-  methodScroll: { paddingHorizontal: 12, marginBottom: 8 },
-  methodBtn: {
-    borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 8, marginRight: 8,
-    backgroundColor: '#f8fafc', alignItems: 'center',
-  },
-  methodBtnActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
-  methodBtnLabel: { fontSize: 12, fontWeight: '600', color: '#374151' },
-  methodBtnLabelActive: { color: '#fff' },
-  methodBtnDist: { fontSize: 11, color: '#6b7280', marginTop: 2 },
+  scoreValue: { fontSize:24, fontWeight:'900', color:'#fff' },
+  scoreLabel: { fontSize:9, color:'rgba(255,255,255,0.9)', fontWeight:'700', textAlign:'center', lineHeight:12 },
 
-  statsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8 },
-  statBox: { alignItems: 'center', padding: 8 },
-  statIcon: { fontSize: 16 },
-  statValue: { fontSize: 13, fontWeight: '700', color: '#1e293b' },
-  statLabel: { fontSize: 10, color: '#9ca3af' },
+  // Panel
+  panel: { backgroundColor:'#fff', paddingTop:10, paddingBottom:8, paddingHorizontal:12,
+    shadowColor:'#000', shadowOpacity:0.15, shadowRadius:12, elevation:10 },
+  titleRow: { marginBottom:8 },
+  panelTitle: { fontSize:14, fontWeight:'800', color:'#1e293b' },
 
-  improvementRow: { backgroundColor: '#f0fdf4', marginHorizontal: 12, borderRadius: 8, padding: 8, marginBottom: 8 },
-  improvementText: { fontSize: 12, color: '#065f46', textAlign: 'center', fontWeight: '600' },
+  // Factor bars
+  factorsRow: { flexDirection:'row', gap:8, marginBottom:10 },
+  factorCard: { flex:1, backgroundColor:'#f8fafc', borderRadius:10, padding:8, alignItems:'center', borderWidth:1, borderColor:'#e5e7eb' },
+  factorIcon: { fontSize:18, marginBottom:2 },
+  factorLabel: { fontSize:10, color:'#9ca3af', fontWeight:'600' },
+  factorValue: { fontSize:11, color:'#374151', fontWeight:'700', marginTop:1, textAlign:'center' },
+  barBg: { width:'100%', height:5, backgroundColor:'#e5e7eb', borderRadius:3, marginTop:5, overflow:'hidden' },
+  barFill: { height:'100%', borderRadius:3 },
+  factorScore: { fontSize:12, fontWeight:'800', marginTop:3 },
 
-  controlRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 10 },
-  monitorBtn: { flex: 1, backgroundColor: '#374151', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  monitorBtnActive: { backgroundColor: '#16a34a' },
-  monitorBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  relocationBtn: { backgroundColor: '#f59e0b', borderRadius: 10, paddingHorizontal: 18, paddingVertical: 12, alignItems: 'center' },
-  relocationBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  row: { flexDirection: 'row', alignItems: 'center' },
+  // Stats
+  statsRow: { flexDirection:'row', justifyContent:'space-around', backgroundColor:'#f8fafc',
+    borderRadius:10, paddingVertical:8, marginBottom:8, borderWidth:1, borderColor:'#e5e7eb' },
+  statBox: { alignItems:'center', paddingHorizontal:4 },
+  statIcon: { fontSize:15 },
+  statValue: { fontSize:14, fontWeight:'800', color:'#1e293b' },
+  statLabel: { fontSize:9, color:'#9ca3af', marginTop:1 },
 
-  alertOverlay: { position: 'absolute', top: 10, left: 12, right: 12 },
-  alertBox: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 14,
-    borderWidth: 2, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, elevation: 8,
-  },
-  alertTitle: { fontSize: 16, fontWeight: '800', color: '#1e293b' },
-  alertSub: { fontSize: 13, color: '#64748b', marginTop: 4 },
-  alertClose: { marginTop: 8, color: '#ef4444', fontWeight: '700' },
+  // Explanation
+  explainBox: { backgroundColor:'#f0fdf4', borderRadius:8, padding:10, borderLeftWidth:4, marginBottom:8 },
+  explainTitle: { fontSize:12, fontWeight:'700', color:'#1e293b', marginBottom:4 },
+  explainText: { fontSize:11, color:'#374151', lineHeight:18 },
+
+  // Improvement
+  improvementBox: { backgroundColor:'#dcfce7', borderRadius:8, padding:8, marginBottom:8, alignItems:'center' },
+  improvementText: { fontSize:12, color:'#065f46', fontWeight:'700' },
+
+  // Buttons
+  btnRow: { flexDirection:'row', gap:10 },
+  monitorBtn: { flex:1, backgroundColor:'#374151', borderRadius:10, paddingVertical:11, alignItems:'center' },
+  monitorBtnActive: { backgroundColor:'#16a34a' },
+  relocBtn: { flex:1, backgroundColor:'#f59e0b', borderRadius:10, paddingVertical:11, alignItems:'center' },
+  btnText: { color:'#fff', fontWeight:'700', fontSize:13 },
+  row: { flexDirection:'row', alignItems:'center' },
+
+  // Alert
+  alertOverlay: { position:'absolute', top:12, left:12, right:12 },
+  alertBox: { backgroundColor:'#fff', borderRadius:12, padding:14, borderWidth:2,
+    shadowColor:'#000', shadowOpacity:0.2, shadowRadius:10, elevation:8 },
+  alertTitle: { fontSize:15, fontWeight:'800', color:'#1e293b' },
+  alertSub: { fontSize:12, color:'#64748b', marginTop:4, lineHeight:18 },
+  alertClose: { marginTop:8, color:'#ef4444', fontWeight:'700' },
+
+  // Loading overlay
+  loadingOverlay: { position:'absolute', top:0, left:0, right:0, bottom:0,
+    backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center' },
+  loadingText: { color:'#fff', marginTop:12, fontSize:15, fontWeight:'700' },
 });

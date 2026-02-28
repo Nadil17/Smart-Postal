@@ -4,7 +4,7 @@
 // e.g.  http://192.168.1.10:8000/api
 // ─────────────────────────────────────────────────────────────
 
-export const API_BASE = "http://192.168.8.111:8000/api"; // ← UPDATE THIS
+export const API_BASE = "http://172.20.10.2:8000/api"; // ← UPDATE THIS
 
 export const DEFAULT_DEPOT = { lat: 6.9271, lng: 79.8612 };
 
